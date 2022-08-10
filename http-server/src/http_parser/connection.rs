@@ -71,7 +71,7 @@ impl<'a> Response<'a> {
 
 	pub fn write_string(&mut self,v:String,code:u16){
 		self.http_state = code;
-        self.body = v;
 		self.add_header(String::from("Content-length"), v.len().to_string());
+        self.body = v;
 	}
 }
