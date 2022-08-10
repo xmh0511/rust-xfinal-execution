@@ -7,7 +7,7 @@ pub mod thread_pool;
 
 mod http_parser;
 
-pub use http_parser::{Request,Response,MiddleWare,RouterMap};
+pub use http_parser::{Request,Response,RouterMap};
 
 pub use macro_utilities::end_point;
 

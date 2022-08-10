@@ -4,23 +4,19 @@ use std::net::TcpStream;
 use std::sync::Arc;
 
 pub mod connection;
-pub use connection::{ Request, Response};
+pub use connection::{Request, Response};
 
-// pub unsafe trait MiddleWareTrait:Send + Sync + Clone{
-// 	fn call(&self,req:&Request,res:& mut Response)->bool;
-// }
+pub trait Router {
+    fn call(&self, req: &Request, res: &mut Response);
+}
 
-// pub unsafe trait RouterTrait:Send+ Sync +Clone{
-// 	fn call(&self,req:&Request,res:& mut Response);
-// }
+pub trait MiddleWare {
+    fn call(&self, req: &Request, res: &mut Response) -> bool;
+}
 
-pub type MiddleWare = fn(&Request, &mut Response) -> bool;
+pub type MiddleWareVec = Vec<Arc<dyn MiddleWare + Send + Sync>>;
 
-pub type MiddleWareVec = Vec<MiddleWare>;
-
-pub type Router = fn(&Request, &mut Response);
-
-pub type RouterValue = (Option<MiddleWareVec>, Router);
+pub type RouterValue = (Option<MiddleWareVec>, Arc<dyn Router + Send + Sync>);
 
 pub type RouterMap = HashMap<String, RouterValue>;
 
@@ -37,20 +33,20 @@ pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
             };
             let mut response = Response {
                 header_pair: HashMap::new(),
-				version,
-				http_state:200,
-				body:String::new()
+                version,
+                http_state: 200,
+                body: String::new(),
             };
-			do_router(&router,&request,& mut response);
-			response.write_string(String::from("hello"), 200);
-            let response =response.to_string();
-			match stream.write(response.as_bytes()) {
-				Ok(x) => {
-					//println!("write size:{}", x);
-					stream.flush().unwrap();
-				}
-				Err(_) => {}
-			};
+            do_router(&router, &request, &mut response);
+            response.write_string(String::from("hello"), 200);
+            let response = response.to_string();
+            match stream.write(response.as_bytes()) {
+                Ok(x) => {
+                    //println!("write size:{}", x);
+                    stream.flush().unwrap();
+                }
+                Err(_) => {}
+            };
         }
         None => {}
     }
@@ -61,7 +57,7 @@ pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
 
 fn read_http_head(stream: &mut TcpStream) -> String {
     let mut buff: [u8; 1024] = [b'0'; 1024];
-    let mut headString: String = String::new();
+    let mut head_string: String = String::new();
     loop {
         match stream.read(&mut buff) {
             Ok(_) => {
@@ -72,14 +68,14 @@ fn read_http_head(stream: &mut TcpStream) -> String {
                 match r {
                     Some(pos) => {
                         //println!("find pos {}", pos);
-                        headString += std::str::from_utf8(&buff[..pos]).unwrap_or_else(|x| {
+                        head_string += std::str::from_utf8(&buff[..pos]).unwrap_or_else(|x| {
                             println!("{}", x.to_string());
                             ""
                         });
                         break;
                     }
                     None => {
-                        headString += std::str::from_utf8(&buff).unwrap_or_else(|x| {
+                        head_string += std::str::from_utf8(&buff).unwrap_or_else(|x| {
                             println!("{}", x.to_string());
                             ""
                         });
@@ -89,7 +85,7 @@ fn read_http_head(stream: &mut TcpStream) -> String {
             Err(_) => {}
         }
     }
-    headString
+    head_string
 }
 
 fn parse_header(
@@ -138,8 +134,8 @@ fn invoke_router(result: &RouterValue, req: &Request, res: &mut Response) {
         Some(middlewares) => {
             // at least one middleware
             for middleware in middlewares {
-                if middleware(req, res) {
-                    router(req, res);
+                if middleware.call(req, res) {
+                    router.call(req, res);
                 } else {
                     break;
                 }
@@ -147,7 +143,7 @@ fn invoke_router(result: &RouterValue, req: &Request, res: &mut Response) {
         }
         None => {
             // there is no middleware
-            router(req, res);
+            router.call(req, res);
         }
     }
 }
@@ -163,11 +159,10 @@ fn do_router(router: &RouterMap, req: &Request, res: &mut Response) {
             key += "/*";
             match router.get(&key) {
                 Some(result) => {
-					invoke_router(result, req, res);
-				},
-                None => {  // actually have not this router
-                    
-				},
+                    invoke_router(result, req, res);
+                }
+                None => { // actually have not this router
+                }
             }
         }
     }
