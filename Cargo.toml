@@ -1,0 +1,6 @@
+[workspace]
+members = [
+	"execution",
+	"http-server",
+	"macro-utilities"
+]
