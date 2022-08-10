@@ -1,5 +1,5 @@
 # rust-xfinal
-A safety web server framework that is written by Rust.
+A safet web server framework that is written by Rust.
 
 ### Introduction
 This is the beginning of the aim to write a safe web server framework by Rust. For now, this repository has not provided a complete and stable function, as [xfinal](https://github.com/xmh0511/xfinal) has done, written by modern c++. The aim is to build up a web server framework, which has the same functionalities as `xfinal` has.
