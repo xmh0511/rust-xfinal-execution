@@ -60,7 +60,7 @@ impl<'a> Response<'a> {
 
     pub(super) fn to_string(&self)->String {
 		let state_text = http_response_table::get_httpstatus_from_code(self.http_state); 
-		let mut s = String::from(state_text);
+		let mut s = format!("{} {}",self.version,state_text);
 		for (k,v) in &self.header_pair{
            s+=&format!("{}:{}\r\n",k,v);
 		}

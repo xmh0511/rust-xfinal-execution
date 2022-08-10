@@ -42,19 +42,21 @@ pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
 				body:String::new()
             };
 			do_router(&router,&request,& mut response);
+			response.write_string(String::from("hello"), 200);
+            let response =response.to_string();
+			match stream.write(response.as_bytes()) {
+				Ok(x) => {
+					//println!("write size:{}", x);
+					stream.flush().unwrap();
+				}
+				Err(_) => {}
+			};
         }
         None => {}
     }
     // println!("read stream:\n{:?}", String::from_utf8_lossy(&buff[..size]));
-    let s = "hello,world";
-    let response = format!("HTTP/1.1 200 OK\r\nContent-length:{}\r\n\r\n{}", s.len(), s);
-    match stream.write(response.as_bytes()) {
-        Ok(x) => {
-            //println!("write size:{}", x);
-            stream.flush().unwrap();
-        }
-        Err(_) => {}
-    };
+    //let s = "hello,world";
+    //let response = format!("HTTP/1.1 200 OK\r\nContent-length:{}\r\n\r\n{}", s.len(), s);
 }
 
 fn read_http_head(stream: &mut TcpStream) -> String {
