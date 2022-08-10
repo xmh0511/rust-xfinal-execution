@@ -1,18 +1,29 @@
 
-use std::io::prelude::*;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
+use std::collections::HashMap;
+
 
 pub mod thread_pool;
 
+mod http_parser;
+
+pub use http_parser::{Request,Response,MiddleWare,RouterMap};
+
 pub use macro_utilities::end_point;
+
+pub const GET:u8 = 0;
+pub const POST:u8 = 1;
+
 #[derive(Debug)]
 pub struct EndPoint {
     pub port: u16,
     pub ip_address: [u8; 4],
 }
+
 pub struct HttpServer {
     end_point: EndPoint,
     thread_number: u16,
+	router:RouterMap
 }
 
 impl HttpServer {
@@ -20,6 +31,7 @@ impl HttpServer {
         Self {
             end_point: end,
             thread_number: count,
+			router:HashMap::new()
         }
     }
 
@@ -29,11 +41,12 @@ impl HttpServer {
         let listen = TcpListener::bind(socket);
         match listen {
             Ok(x) => {
-                let mut pool = thread_pool::ThreadPool::new(self.thread_number, handle_incoming);
+                let mut pool = thread_pool::ThreadPool::new(self.thread_number, http_parser::handle_incoming);
                 for conn in x.incoming() {
                     match conn {
                         Ok(stream) => {
-                            pool.poll(stream);
+							let router = self.router.clone();
+                            pool.poll((router,stream));
                         }
                         Err(e) => {
                             println!("on connection error:{}", e.to_string());
@@ -49,25 +62,7 @@ impl HttpServer {
     }
 }
 
-fn handle_incoming(mut stream: TcpStream) {
-    let mut buff: [u8; 1024] = [b'0'; 1024];
-    let read_r = stream.read(&mut buff);
-    let size = if let Ok(size) = read_r {
-        size
-    } else {
-        return;
-    };
-    // println!("read stream:\n{:?}", String::from_utf8_lossy(&buff[..size]));
-    let s = "hello,world";
-    let response = format!("HTTP/1.1 200 OK\r\nContent-length:{}\r\n\r\n{}", s.len(), s);
-    match stream.write(response.as_bytes()) {
-        Ok(x) => {
-            //println!("write size:{}", x);
-            stream.flush().unwrap();
-        }
-        Err(_) => {}
-    };
-}
+
 
 // #[macro_export]
 // macro_rules! end_point {
