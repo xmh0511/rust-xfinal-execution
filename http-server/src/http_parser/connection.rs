@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 pub mod http_response_table {
-    const state_table: [(u16, &str); 19] = [
+    const STATE_TABLE: [(u16, &str); 19] = [
         (101, "101 Switching Protocals\r\n"),
         (200, "200 OK\r\n"),
         (201, "201 Created\r\n"),
@@ -24,8 +24,8 @@ pub mod http_response_table {
     ];
 
     pub(super) fn get_httpstatus_from_code(code: u16) -> &'static str {
-        match state_table.binary_search_by_key(&code, |&(k, v)| k) {
-            Ok(index) => state_table[index].1,
+        match STATE_TABLE.binary_search_by_key(&code, |&(k, v)| k) {
+            Ok(index) => STATE_TABLE[index].1,
             Err(_) => panic!("not supporting such a http state code"),
         }
     }
