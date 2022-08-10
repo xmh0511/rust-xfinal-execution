@@ -2,7 +2,7 @@
 A safety web server framework that is written by Rust.
 
 ### Introduction
-This is the beginning of the aim to write a safety web server framework by Rust. For now, this repository has not provided a complete and stable function, as [xfinal](https://github.com/xmh0511/xfinal) has done, written by modern c++. The aim is to build up a web server framework, which has the same functionalities as `xfinal` has.
+This is the beginning of the aim to write a safe web server framework by Rust. For now, this repository has not provided a complete and stable function, as [xfinal](https://github.com/xmh0511/xfinal) has done, written by modern c++. The aim is to build up a web server framework, which has the same functionalities as `xfinal` has.
 
 ### Advantages 
 1. Since the advantages of Rust are that it is safe on memory and multiple threads, and it is a modern programming language that has almost no pieces baggage c++ has, the framework that is written based on Rust has no worry about the hard problems with memory and data race. Rust can guarantee the safety of these aspects. 
