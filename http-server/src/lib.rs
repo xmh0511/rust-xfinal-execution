@@ -102,7 +102,7 @@ macro_rules! inject_middlewares {
 		{
 			use std::sync::Arc;
 			type T = Arc<dyn MiddleWare + Send + Sync>;
-			let x = vec![$( Arc::new($m) as T )*];
+			let x = vec![$( Arc::new($m) as T ,)*];
 			x
 		}
 	};

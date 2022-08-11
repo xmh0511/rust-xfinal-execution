@@ -158,13 +158,18 @@ fn invoke_router(result: &RouterValue, req: &Request, res: &mut Response) {
     match &result.0 {
         Some(middlewares) => {
             // at least one middleware
+			let mut r = true;
             for middleware in middlewares {
                 if middleware.call(req, res) {
-                    router.call(req, res);
+
                 } else {
+					r = false;
                     break;
                 }
-            }
+            };
+			if r{
+				router.call(req, res);
+			}
         }
         None => {
             // there is no middleware

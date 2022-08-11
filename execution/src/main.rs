@@ -9,11 +9,15 @@ fn main() {
         .route::<GET>("/")
         .reg(|req: &Request, res: &mut Response| {
             res.write_string(String::from("hello from router"), 200);
-        });
+    });
 
     let middlewares = inject_middlewares! {
         |req:& Request,res:&mut Response|->bool{
-            println!("invoke middleware");
+            println!("invoke middleware1");
+            true
+        },
+		|req:& Request,res:&mut Response|->bool{
+            println!("invoke middleware2");
             true
         }
     };
