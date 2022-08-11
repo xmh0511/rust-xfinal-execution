@@ -166,7 +166,7 @@ impl<'a> Response<'a> {
             s += &format!("{}:{}\r\n", k, v);
         }
         s += "\r\n";
-        s += &self.body.clone();
+        s += &self.body;
         s
     }
 

@@ -8,7 +8,7 @@ fn main() {
     http_server
         .route::<GET>("/")
         .reg(|req: &Request, res: &mut Response| {
-			println!("{:?}",req.get_header("Connection"));
+			//println!("{:?}",req.get_header("Connection"));
             res.write_string(String::from("hello from router"), 200);
         });
 
