@@ -62,6 +62,7 @@ pub struct Request<'a> {
     pub(super) url: &'a str,
     pub(super) method: &'a str,
     pub(super) version: &'a str,
+	pub(super) body: BodyContent<'a>,
 }
 
 impl<'a> Request<'a> {
@@ -117,4 +118,13 @@ impl<'a> Response<'a> {
     }
 
     pub fn chunked() {}
+}
+
+
+#[derive(Debug)]
+pub enum BodyContent<'a> {
+    UrlForm(HashMap<&'a str, &'a str>),
+    PureText(&'a str),
+    None,
+    Bad,
 }
