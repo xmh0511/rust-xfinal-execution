@@ -125,17 +125,17 @@ pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
                 }
                 HasBody::Bad => {
                     println!("invalid http body content");
-                    stream.shutdown(Shutdown::Both).unwrap_err();
+                    let _ =stream.shutdown(Shutdown::Both);
                 }
             },
             None => {
                 println!("invalid http head content");
-                stream.shutdown(Shutdown::Both).unwrap_err();
+                let _ = stream.shutdown(Shutdown::Both);
             }
         }
     } else {
         println!("invalid http head text");
-        stream.shutdown(Shutdown::Both).unwrap_err();
+        let _ = stream.shutdown(Shutdown::Both);
     }
 }
 
