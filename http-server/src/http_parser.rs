@@ -94,48 +94,108 @@ fn construct_http_event(
     }
 }
 
-pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
-    if let Some((mut head_content, possible_body)) = read_http_head(&mut stream) {
-        let head_result = parse_header(&mut head_content);
-        match head_result {
-            Some((method, url, version, map)) => match has_body(&map) {
-                HasBody::Len(size) => match possible_body {
-                    Some(partial_body) => {
-                        let mut body = partial_body;
-                        let body = read_body(&mut stream, &map, &mut body, size);
-                        //println!("{:?}", body);
-                        construct_http_event(&mut stream, &router, method, url, version, map, body);
-                    }
-                    None => {
-                        let mut body: Vec<u8> = Vec::new();
-                        let body = read_body(&mut stream, &map, &mut body, size);
-                        construct_http_event(&mut stream, &router, method, url, version, map, body);
-                    }
-                },
-                HasBody::None => {
-                    construct_http_event(
-                        &mut stream,
-                        &router,
-                        method,
-                        url,
-                        version,
-                        map,
-                        BodyContent::None,
-                    );
-                }
-                HasBody::Bad => {
-                    println!("invalid http body content");
-                    let _ =stream.shutdown(Shutdown::Both);
-                }
-            },
-            None => {
-                println!("invalid http head content");
-                let _ = stream.shutdown(Shutdown::Both);
+fn is_keep_alive(head_map: &HashMap<&str, &str>) -> bool {
+    let i = head_map.keys().find(|&&k| {
+        if k.to_lowercase() == "connection" {
+            true
+        } else {
+            false
+        }
+    });
+    match i {
+        Some(&k) => {
+            let &v = head_map.get(k).unwrap();
+            if v.to_lowercase() == "keep-alive" {
+                true
+            } else {
+                false
             }
         }
-    } else {
-        println!("invalid http head text");
-        let _ = stream.shutdown(Shutdown::Both);
+        None => false,
+    }
+}
+
+pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
+    'Back: loop {
+        if let Some((mut head_content, possible_body)) = read_http_head(&mut stream) {
+            let head_result = parse_header(&mut head_content);
+            match head_result {
+                Some((method, url, version, map)) => {
+                    let need_alive = is_keep_alive(&map);
+                    match has_body(&map) {
+                        HasBody::Len(size) => match possible_body {
+                            Some(partial_body) => {
+                                let mut body = partial_body;
+                                let body = read_body(&mut stream, &map, &mut body, size);
+                                //println!("{:?}", body);
+                                construct_http_event(
+                                    &mut stream,
+                                    &router,
+                                    method,
+                                    url,
+                                    version,
+                                    map,
+                                    body,
+                                );
+                                if need_alive {
+                                    break 'Back;
+                                } else {
+                                    break;
+                                }
+                            }
+                            None => {
+                                let mut body: Vec<u8> = Vec::new();
+                                let body = read_body(&mut stream, &map, &mut body, size);
+                                construct_http_event(
+                                    &mut stream,
+                                    &router,
+                                    method,
+                                    url,
+                                    version,
+                                    map,
+                                    body,
+                                );
+                                if need_alive {
+                                    break 'Back;
+                                } else {
+                                    break;
+                                }
+                            }
+                        },
+                        HasBody::None => {
+                            construct_http_event(
+                                &mut stream,
+                                &router,
+                                method,
+                                url,
+                                version,
+                                map,
+                                BodyContent::None,
+                            );
+                            if need_alive {
+                                break 'Back;
+                            } else {
+                                break;
+                            }
+                        }
+                        HasBody::Bad => {
+                            println!("invalid http body content");
+                            let _ = stream.shutdown(Shutdown::Both);
+                            break;
+                        }
+                    }
+                }
+                None => {
+                    println!("invalid http head content");
+                    let _ = stream.shutdown(Shutdown::Both);
+                    break;
+                }
+            }
+        } else {
+            println!("invalid http head text");
+            let _ = stream.shutdown(Shutdown::Both);
+            break;
+        }
     }
 }
 
@@ -382,7 +442,13 @@ fn parse_url_form_body(container: &mut Vec<u8>) -> BodyContent<'_> {
                     Some((k, v)) => (k, v),
                     None => ("", ""),
                 })
-                .filter(|(k, v)| if k.len() == 0 || v.len()==0 { false } else { true })
+                .filter(|(k, v)| {
+                    if k.len() == 0 || v.len() == 0 {
+                        false
+                    } else {
+                        true
+                    }
+                })
                 .collect();
             return BodyContent::UrlForm(t);
         }
