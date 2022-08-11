@@ -6,7 +6,7 @@ pub mod thread_pool;
 
 mod http_parser;
 
-pub use http_parser::{MiddleWare, Request, Response, Router, RouterMap, RouterValue};
+pub use http_parser::{MiddleWare, Request, Response, Router, RouterMap, RouterValue,ConnectionData,ConnectionConfig};
 
 pub use macro_utilities::end_point;
 
@@ -72,6 +72,7 @@ impl HttpServer {
         let listen = TcpListener::bind(socket);
         self.not_found_default_if_not_set();
         let safe_router = Arc::new(self.router.clone());
+        let conn_data = ConnectionData{router_map:safe_router,conn_config:ConnectionConfig{read_time_out:5*1000}};
         match listen {
             Ok(x) => {
                 let mut pool =
@@ -79,8 +80,8 @@ impl HttpServer {
                 for conn in x.incoming() {
                     match conn {
                         Ok(stream) => {
-                            let router = safe_router.clone();
-                            pool.poll((router, stream));
+                            let conn_data = conn_data.clone();
+                            pool.poll((conn_data, stream));
                         }
                         Err(e) => {
                             println!("on connection error:{}", e.to_string());

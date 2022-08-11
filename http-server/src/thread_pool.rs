@@ -2,8 +2,8 @@ use std::sync::mpsc;
 use std::thread;
 
 
-struct MyTask<TcpStream> {
-    sender: mpsc::Sender<TcpStream>,
+struct MyTask<T> {
+    sender: mpsc::Sender<T>,
     task: thread::JoinHandle<()>,
 }
 pub struct ThreadPool<T> {
@@ -11,8 +11,8 @@ pub struct ThreadPool<T> {
     index: u16,
     max: u16,
 }
-impl<TcpStream:'static + Send,> ThreadPool<TcpStream> {
-    pub(super) fn new<F: FnMut(TcpStream) + Clone + Send + 'static>(num: u16, f: F) -> Self {
+impl<T:'static + Send,> ThreadPool<T> {
+    pub(super) fn new<F: FnMut(T) + Clone + Send + 'static>(num: u16, f: F) -> Self {
         let mut r = Self {
             tasks: Vec::new(),
             index: 0,
@@ -42,13 +42,13 @@ impl<TcpStream:'static + Send,> ThreadPool<TcpStream> {
         r
     }
 
-    pub(super) fn poll(&mut self, stream: TcpStream) {
+    pub(super) fn poll(&mut self, data: T) {
         if self.index >= self.max {
             self.index = 0;
         }
         //println!("current:{}", self.index);
         if let Some(task) = self.tasks.get(self.index as usize) {
-            match task.sender.send(stream){
+            match task.sender.send(data){
                 Ok(_) => {
 					self.index += 1;
 				},

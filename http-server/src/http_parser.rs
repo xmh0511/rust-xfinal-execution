@@ -38,6 +38,18 @@ where
     }
 }
 
+#[derive(Clone)]
+pub struct ConnectionConfig{
+    pub(super) read_time_out:u32
+}
+
+
+#[derive(Clone)]
+pub struct ConnectionData{
+    pub(super) router_map:RouterMap,
+    pub(super) conn_config:ConnectionConfig
+}
+
 enum HasBody {
     Len(usize),
     None,
@@ -70,6 +82,7 @@ fn construct_http_event(
     version: &str,
     head_map: HashMap<&str, &str>,
     body: BodyContent,
+    _need_alive:bool
 ) {
     let request = Request {
         header_pair: head_map,
@@ -86,6 +99,9 @@ fn construct_http_event(
         chunked: false,
     };
     do_router(&router, &request, &mut response);
+    // if need_alive{
+    //    response.add_header(String::from("Connection"), String::from("keep-alive"));
+    // }
     if !response.chunked {
         write_once(stream, &mut response);
     } else {
@@ -114,9 +130,11 @@ fn is_keep_alive(head_map: &HashMap<&str, &str>) -> bool {
     }
 }
 
-pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
+pub fn handle_incoming((conn_data, mut stream): (ConnectionData, TcpStream)) {
     'Back: loop {
-        if let Some((mut head_content, possible_body)) = read_http_head(&mut stream) {
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(conn_data.conn_config.read_time_out as u64)));
+        let read_result = read_http_head(&mut stream);
+        if let Ok((mut head_content, possible_body)) = read_result {
             let head_result = parse_header(&mut head_content);
             match head_result {
                 Some((method, url, version, map)) => {
@@ -129,15 +147,16 @@ pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
                                 //println!("{:?}", body);
                                 construct_http_event(
                                     &mut stream,
-                                    &router,
+                                    &conn_data.router_map,
                                     method,
                                     url,
                                     version,
                                     map,
                                     body,
+                                    need_alive
                                 );
                                 if need_alive {
-                                    break 'Back;
+                                    continue 'Back;
                                 } else {
                                     break;
                                 }
@@ -147,15 +166,16 @@ pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
                                 let body = read_body(&mut stream, &map, &mut body, size);
                                 construct_http_event(
                                     &mut stream,
-                                    &router,
+                                    &conn_data.router_map,
                                     method,
                                     url,
                                     version,
                                     map,
                                     body,
+                                    need_alive
                                 );
                                 if need_alive {
-                                    break 'Back;
+                                    continue 'Back;
                                 } else {
                                     break;
                                 }
@@ -164,15 +184,16 @@ pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
                         HasBody::None => {
                             construct_http_event(
                                 &mut stream,
-                                &router,
+                                &conn_data.router_map,
                                 method,
                                 url,
                                 version,
                                 map,
                                 BodyContent::None,
+                                need_alive
                             );
                             if need_alive {
-                                break 'Back;
+                                continue 'Back;
                             } else {
                                 break;
                             }
@@ -190,12 +211,17 @@ pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
                     break;
                 }
             }
-        } else {
-            println!("invalid http head text");
+        } else if let Err(time_out) = read_result {
+            if !time_out{
+                println!("invalid http head text");
+            }else{
+                println!("read time out");
+            }
             let _ = stream.shutdown(Shutdown::Both);
             break;
         }
     }
+    //println!("total exit");
 }
 
 fn write_once(stream: &mut TcpStream, response: &mut Response) {
@@ -214,7 +240,7 @@ fn write_once(stream: &mut TcpStream, response: &mut Response) {
 }
 
 
-fn read_http_head(stream: &mut TcpStream) -> Option<(String, Option<Vec<u8>>)> {
+fn read_http_head(stream: &mut TcpStream) -> Result<(String, Option<Vec<u8>>),bool> {
     let mut buff: [u8; 1024] = [b'\0'; 1024];
     let mut head_string: String = String::new();
     loop {
@@ -237,25 +263,25 @@ fn read_http_head(stream: &mut TcpStream) -> Option<(String, Option<Vec<u8>>)> {
                                     let r = &buff[crlf_end..read_size];
                                     //println!("{:?}\n{}",r,std::str::from_utf8(r).unwrap());
                                     let c: Vec<u8> = r.iter().map(|e| *e).collect();
-                                    return Some((head_string, Some(c)));
+                                    return Ok((head_string, Some(c)));
                                 }
-                                return Some((head_string, None));
+                                return Ok((head_string, None));
                             }
                             Err(_) => {
-                                return None;
+                                return Err(false);
                             }
                         }
                     }
                     None => match std::str::from_utf8(&buff) {
                         Ok(s) => head_string += s,
                         Err(_) => {
-                            return None;
+                            return Err(false);
                         }
                     },
                 }
             }
-            Err(_) => {
-                return None;
+            Err(e) => {
+                return Err(true);
             }
         }
     }
