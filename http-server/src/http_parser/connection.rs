@@ -29,6 +29,33 @@ pub mod http_response_table {
             Err(_) => panic!("not supporting such a http state code"),
         }
     }
+
+    const HTTP_METHODS: [(u8, &str); 9] = [
+        (0, "GET"),
+        (1, "POST"),
+        (2, "OPTIONS"),
+        (3, "DELETE"),
+        (4, "HEAD"),
+        (5, "PUT"),
+        (6, "PATCH"),
+        (7, "CONNECT"),
+        (8, "TRACE"),
+    ];
+    pub const GET: u8 = 0;
+    pub const POST: u8 = 1;
+    pub const OPTIONS: u8 = 2;
+    pub const DELETE: u8 = 3;
+    pub const HEAD: u8 = 4;
+    pub const PUT: u8 = 5;
+    pub const PATCH: u8 = 6;
+    pub const CONNECT: u8 = 7;
+    pub const TRACE: u8 = 8;
+    pub fn get_httpmethod_from_code(code: u8) -> &'static str {
+        match HTTP_METHODS.binary_search_by_key(&code, |&(k, v)| k) {
+            Ok(index) => HTTP_METHODS[index].1,
+            Err(_) => panic!("not supporting such a http state code"),
+        }
+    }
 }
 pub struct Request<'a> {
     pub(super) header_pair: HashMap<&'a str, &'a str>,
@@ -46,11 +73,24 @@ impl<'a> Request<'a> {
     }
 }
 
+pub struct ResponseChunked<'b, 'a> {
+    res: &'b mut Response<'a>,
+}
+
+impl<'b, 'a> ResponseChunked<'b, 'a> {
+    pub fn chunked(&mut self) {
+        self.res
+            .add_header(String::from("Transfer-Encoding"), String::from("chunked"));
+        self.res.chunked = true;
+    }
+}
+
 pub struct Response<'a> {
     pub(super) header_pair: HashMap<String, String>,
     pub(super) version: &'a str,
     pub(super) http_state: u16,
-	pub(super) body:String
+    pub(super) body: String,
+    pub(super) chunked: bool,
 }
 
 impl<'a> Response<'a> {
@@ -58,20 +98,23 @@ impl<'a> Response<'a> {
         self.header_pair.insert(key, value);
     }
 
-    pub(super) fn to_string(&self)->String {
-		let state_text = http_response_table::get_httpstatus_from_code(self.http_state); 
-		let mut s = format!("{} {}",self.version,state_text);
-		for (k,v) in &self.header_pair{
-           s+=&format!("{}:{}\r\n",k,v);
-		}
-		s+="\r\n";
-		s+= &self.body.clone();
-		s
+    pub(super) fn to_string(&self) -> String {
+        let state_text = http_response_table::get_httpstatus_from_code(self.http_state);
+        let mut s = format!("{} {}", self.version, state_text);
+        for (k, v) in &self.header_pair {
+            s += &format!("{}:{}\r\n", k, v);
+        }
+        s += "\r\n";
+        s += &self.body.clone();
+        s
     }
 
-	pub fn write_string(&mut self,v:String,code:u16){
-		self.http_state = code;
-		self.add_header(String::from("Content-length"), v.len().to_string());
+    pub fn write_string(&mut self, v: String, code: u16) -> ResponseChunked<'_, 'a> {
+        self.http_state = code;
+        self.add_header(String::from("Content-length"), v.len().to_string());
         self.body = v;
-	}
+        ResponseChunked { res: self }
+    }
+
+    pub fn chunked() {}
 }

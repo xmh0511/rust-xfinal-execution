@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Error};
 use std::io::prelude::*;
 use std::net::TcpStream;
 use std::sync::Arc;
@@ -14,11 +14,23 @@ pub trait MiddleWare {
     fn call(&self, req: &Request, res: &mut Response) -> bool;
 }
 
-pub type MiddleWareVec = Vec<Box<dyn MiddleWare + Send + Sync>>;
+pub type MiddleWareVec = Vec<Arc<dyn MiddleWare + Send + Sync>>;
 
-pub type RouterValue = (Option<MiddleWareVec>, Box<dyn Router + Send + Sync>);
+pub type RouterValue = (Option<MiddleWareVec>, Arc<dyn Router + Send + Sync>);
 
 pub type RouterMap = Arc<HashMap<String, RouterValue>>;
+
+impl<T> MiddleWare for T where T:Fn(&Request, &mut Response)->bool{
+    fn call(&self, req: &Request, res: &mut Response) -> bool {
+		(*self)(req,res)
+    }
+}
+
+impl<T> Router for T where T: Fn(&Request, &mut Response){
+    fn call(&self, req: &Request, res: &mut Response) {
+		(*self)(req,res)
+    }
+}
 
 pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
     let mut head_content = read_http_head(&mut stream);
@@ -36,23 +48,36 @@ pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
                 version,
                 http_state: 200,
                 body: String::new(),
+				chunked:false
             };
             do_router(&router, &request, &mut response);
-            response.write_string(String::from("hello"), 200);
-            let response = response.to_string();
-            match stream.write(response.as_bytes()) {
-                Ok(x) => {
-                    //println!("write size:{}", x);
-                    stream.flush().unwrap();
-                }
-                Err(_) => {}
-            };
+            // response.write_string(String::from("hello"), 200);
+			if !response.chunked{
+                write_once(&mut stream,& mut response);
+			}else{
+				// chunked transfer
+			}
         }
         None => {}
     }
     // println!("read stream:\n{:?}", String::from_utf8_lossy(&buff[..size]));
     //let s = "hello,world";
     //let response = format!("HTTP/1.1 200 OK\r\nContent-length:{}\r\n\r\n{}", s.len(), s);
+}
+
+fn write_once(stream:& mut TcpStream, response:& mut Response){
+    let s =  response.to_string();
+	match stream.write(s.as_bytes()) {
+		Ok(_) => {
+			//println!("write size:{}", x);
+			if let Err(e)  = stream.flush(){
+                println!("stream flush error:{}",e.to_string());
+			};
+		}
+		Err(e) => {
+            println!("stream write error:{}",e.to_string());
+		}
+	};
 }
 
 fn read_http_head(stream: &mut TcpStream) -> String {
