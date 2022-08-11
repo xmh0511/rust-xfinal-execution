@@ -382,7 +382,7 @@ fn parse_url_form_body(container: &mut Vec<u8>) -> BodyContent<'_> {
                     Some((k, v)) => (k, v),
                     None => ("", ""),
                 })
-                .filter(|(k, v)| if k.len() == 0 { false } else { true })
+                .filter(|(k, v)| if k.len() == 0 || v.len()==0 { false } else { true })
                 .collect();
             return BodyContent::UrlForm(t);
         }
