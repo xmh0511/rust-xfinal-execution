@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::prelude::*;
+use std::io::{prelude::*, ErrorKind};
 use std::net::{Shutdown, TcpStream};
 use std::sync::Arc;
 
@@ -281,7 +281,17 @@ fn read_http_head(stream: &mut TcpStream) -> Result<(String, Option<Vec<u8>>), b
                 }
             }
             Err(e) => {
-                return Err(true);
+                match e.kind(){
+                    ErrorKind::TimedOut=>{
+                        return Err(true);
+                    },
+                    ErrorKind::WouldBlock=>{
+                        return Err(true);
+                    },
+                    _=>{
+                        return Err(false);
+                    }
+                }
             }
         }
     }
