@@ -1,19 +1,17 @@
-
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::collections::HashMap;
-use std::sync::{Arc};
-
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
+use std::sync::Arc;
 
 pub mod thread_pool;
 
 mod http_parser;
 
-pub use http_parser::{Request,Response,RouterMap,MiddleWare,Router,RouterValue};
+pub use http_parser::{MiddleWare, Request, Response, Router, RouterMap, RouterValue};
 
 pub use macro_utilities::end_point;
 
 pub use http_parser::connection::http_response_table::{
-	GET,POST,OPTIONS,DELETE,HEAD,PUT,PATCH,CONNECT,TRACE
+    CONNECT, DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, TRACE,
 };
 
 use http_parser::connection::http_response_table::get_httpmethod_from_code;
@@ -27,25 +25,36 @@ pub struct EndPoint {
 pub struct HttpServer {
     end_point: EndPoint,
     thread_number: u16,
-	router:HashMap<String, RouterValue>
+    router: HashMap<String, RouterValue>,
 }
 
-pub struct RouterRegister<'a>{
-     server:&'a mut HttpServer,
-	 path:&'a str,
-	 method:&'a str
+pub struct RouterRegister<'a> {
+    server: &'a mut HttpServer,
+    path: &'a str,
+    method: &'a str,
 }
 
-impl<'a> RouterRegister<'a>  {
-	pub fn reg<F>(&mut self,f:F) where F: Router + Send + Sync + 'static{
-		let router_path = format!("{}{}",self.method,self.path);
-		self.server.router.insert(router_path, (None,Arc::new(f)));
-	}
+impl<'a> RouterRegister<'a> {
+    pub fn reg<F>(&mut self, f: F)
+    where
+        F: Router + Send + Sync + 'static,
+    {
+        let router_path = format!("{}{}", self.method, self.path);
+        self.server.router.insert(router_path, (None, Arc::new(f)));
+    }
 
-	pub fn reg_with_middlewares<F>(&mut self,middlewares:Vec<Arc<dyn MiddleWare + Send + Sync>>,f:F) where F: Router + Send + Sync + 'static{
-		let router_path = format!("{}{}",self.method,self.path);
-		self.server.router.insert(router_path, (Some(middlewares),Arc::new(f)));
-	}
+    pub fn reg_with_middlewares<F>(
+        &mut self,
+        middlewares: Vec<Arc<dyn MiddleWare + Send + Sync>>,
+        f: F,
+    ) where
+        F: Router + Send + Sync + 'static,
+    {
+        let router_path = format!("{}{}", self.method, self.path);
+        self.server
+            .router
+            .insert(router_path, (Some(middlewares), Arc::new(f)));
+    }
 }
 
 impl HttpServer {
@@ -53,23 +62,25 @@ impl HttpServer {
         Self {
             end_point: end,
             thread_number: count,
-			router:HashMap::new()
+            router: HashMap::new(),
         }
     }
 
-    pub fn run(&self) {
+    pub fn run(& mut self) {
         let [a, b, c, d] = self.end_point.ip_address;
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(a, b, c, d)), self.end_point.port);
         let listen = TcpListener::bind(socket);
-		let safe_router = Arc::new(self.router.clone());
+        self.not_found_default_if_not_set();
+        let safe_router = Arc::new(self.router.clone());
         match listen {
             Ok(x) => {
-                let mut pool = thread_pool::ThreadPool::new(self.thread_number, http_parser::handle_incoming);
+                let mut pool =
+                    thread_pool::ThreadPool::new(self.thread_number, http_parser::handle_incoming);
                 for conn in x.incoming() {
                     match conn {
                         Ok(stream) => {
-							let router = safe_router.clone();
-                            pool.poll((router,stream));
+                            let router = safe_router.clone();
+                            pool.poll((router, stream));
                         }
                         Err(e) => {
                             println!("on connection error:{}", e.to_string());
@@ -84,17 +95,31 @@ impl HttpServer {
         }
     }
 
-	pub fn route<'a,const M:u8>(&'a mut self, path:&'a str) -> RouterRegister<'_> {
+    pub fn route<'a, const M: u8>(&'a mut self, path: &'a str) -> RouterRegister<'_> {
         let method = get_httpmethod_from_code(M);
-		RouterRegister{
-			server:self,
-			method,
-			path
-		}
-	}
+        RouterRegister {
+            server: self,
+            method,
+            path,
+        }
+    }
+
+    pub fn set_not_found<F>(& mut self,f: F)
+    where
+        F: Router + Send + Sync + 'static,
+    {
+        self.router.insert(String::from("NEVER_FOUND_FOR_ALL"), (None,Arc::new(f)));
+    }
+
+    fn not_found_default_if_not_set(& mut self){
+       let r =  &self.router.get(&String::from("NEVER_FOUND_FOR_ALL"));
+       if let None = *r{
+          self.set_not_found(|req:&Request,res:& mut Response|{
+            res.write_state(404);
+          });
+       }
+    }
 }
-
-
 
 #[macro_export]
 macro_rules! inject_middlewares {
@@ -107,10 +132,6 @@ macro_rules! inject_middlewares {
 		}
 	};
 }
-
-
-
-
 
 // #[macro_export]
 // macro_rules! end_point {

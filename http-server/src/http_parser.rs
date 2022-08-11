@@ -82,11 +82,10 @@ fn construct_http_event(
         header_pair: HashMap::new(),
         version,
         http_state: 200,
-        body: String::new(),
+        body: None,
         chunked: false,
     };
     do_router(&router, &request, &mut response);
-
     if !response.chunked {
         write_once(stream, &mut response);
     } else {
@@ -214,6 +213,7 @@ fn write_once(stream: &mut TcpStream, response: &mut Response) {
     };
 }
 
+
 fn read_http_head(stream: &mut TcpStream) -> Option<(String, Option<Vec<u8>>)> {
     let mut buff: [u8; 1024] = [b'\0'; 1024];
     let mut head_string: String = String::new();
@@ -337,7 +337,10 @@ fn do_router(router: &RouterMap, req: &Request, res: &mut Response) {
                 Some(result) => {
                     invoke_router(result, req, res);
                 }
-                None => { // actually have not this router
+                None => {
+                    // actually have not this router
+                    let not_found = router.get("NEVER_FOUND_FOR_ALL").unwrap();
+                    not_found.1.call(req, res);
                 }
             }
         }

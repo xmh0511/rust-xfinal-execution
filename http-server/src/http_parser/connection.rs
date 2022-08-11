@@ -150,7 +150,7 @@ pub struct Response<'a> {
     pub(super) header_pair: HashMap<String, String>,
     pub(super) version: &'a str,
     pub(super) http_state: u16,
-    pub(super) body: String,
+    pub(super) body: Option<String>,
     pub(super) chunked: bool,
 }
 
@@ -166,15 +166,28 @@ impl<'a> Response<'a> {
             s += &format!("{}:{}\r\n", k, v);
         }
         s += "\r\n";
-        s += &self.body;
-        s
+        match &self.body {
+            Some(v) => {
+               s+=&*v;
+               s
+            },
+            None => {
+                s
+            },
+        }
     }
 
     pub fn write_string(&mut self, v: String, code: u16) -> ResponseChunked<'_, 'a> {
         self.http_state = code;
         self.add_header(String::from("Content-length"), v.len().to_string());
-        self.body = v;
+        self.body = Some(v);
         ResponseChunked { res: self }
+    }
+
+    pub fn write_state(& mut self,code: u16){
+        self.http_state = code;
+        self.add_header(String::from("Content-length"), 0.to_string());
+        self.body = None;
     }
 
     pub fn chunked() {}

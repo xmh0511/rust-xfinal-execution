@@ -18,6 +18,10 @@ fn main() {
             res.write_string(String::from("hello from router"), 200);
     });
 
+    http_server.set_not_found(|req: &Request, res: &mut Response|{
+        res.write_string("not found".to_string(), 404);
+    });
+
     // let middlewares = inject_middlewares! {
     //     |req:& Request,res:&mut Response|->bool{
     //         println!("invoke middleware1");
