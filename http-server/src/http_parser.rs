@@ -160,9 +160,7 @@ fn invoke_router(result: &RouterValue, req: &Request, res: &mut Response) {
             // at least one middleware
 			let mut r = true;
             for middleware in middlewares {
-                if middleware.call(req, res) {
-
-                } else {
+                if !middleware.call(req, res) {
 					r = false;
                     break;
                 }
