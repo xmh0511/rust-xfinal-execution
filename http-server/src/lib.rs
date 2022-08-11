@@ -72,7 +72,7 @@ impl HttpServer {
         let listen = TcpListener::bind(socket);
         self.not_found_default_if_not_set();
         let safe_router = Arc::new(self.router.clone());
-        let conn_data = ConnectionData{router_map:safe_router,conn_config:ConnectionConfig{read_time_out:5*1000}};
+        let conn_data = Arc::new(ConnectionData{router_map:safe_router,conn_config:ConnectionConfig{read_time_out:5*1000}});
         match listen {
             Ok(x) => {
                 let mut pool =

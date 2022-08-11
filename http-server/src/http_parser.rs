@@ -39,15 +39,14 @@ where
 }
 
 #[derive(Clone)]
-pub struct ConnectionConfig{
-    pub(super) read_time_out:u32
+pub struct ConnectionConfig {
+    pub(super) read_time_out: u32,
 }
 
-
 #[derive(Clone)]
-pub struct ConnectionData{
-    pub(super) router_map:RouterMap,
-    pub(super) conn_config:ConnectionConfig
+pub struct ConnectionData {
+    pub(super) router_map: RouterMap,
+    pub(super) conn_config: ConnectionConfig,
 }
 
 enum HasBody {
@@ -82,7 +81,7 @@ fn construct_http_event(
     version: &str,
     head_map: HashMap<&str, &str>,
     body: BodyContent,
-    _need_alive:bool
+    _need_alive: bool,
 ) {
     let request = Request {
         header_pair: head_map,
@@ -130,9 +129,11 @@ fn is_keep_alive(head_map: &HashMap<&str, &str>) -> bool {
     }
 }
 
-pub fn handle_incoming((conn_data, mut stream): (ConnectionData, TcpStream)) {
+pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)) {
     'Back: loop {
-        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(conn_data.conn_config.read_time_out as u64)));
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(
+            conn_data.conn_config.read_time_out as u64,
+        )));
         let read_result = read_http_head(&mut stream);
         if let Ok((mut head_content, possible_body)) = read_result {
             let head_result = parse_header(&mut head_content);
@@ -153,7 +154,7 @@ pub fn handle_incoming((conn_data, mut stream): (ConnectionData, TcpStream)) {
                                     version,
                                     map,
                                     body,
-                                    need_alive
+                                    need_alive,
                                 );
                                 if need_alive {
                                     continue 'Back;
@@ -172,7 +173,7 @@ pub fn handle_incoming((conn_data, mut stream): (ConnectionData, TcpStream)) {
                                     version,
                                     map,
                                     body,
-                                    need_alive
+                                    need_alive,
                                 );
                                 if need_alive {
                                     continue 'Back;
@@ -190,7 +191,7 @@ pub fn handle_incoming((conn_data, mut stream): (ConnectionData, TcpStream)) {
                                 version,
                                 map,
                                 BodyContent::None,
-                                need_alive
+                                need_alive,
                             );
                             if need_alive {
                                 continue 'Back;
@@ -212,9 +213,9 @@ pub fn handle_incoming((conn_data, mut stream): (ConnectionData, TcpStream)) {
                 }
             }
         } else if let Err(time_out) = read_result {
-            if !time_out{
+            if !time_out {
                 println!("invalid http head text");
-            }else{
+            } else {
                 println!("read time out");
             }
             let _ = stream.shutdown(Shutdown::Both);
@@ -239,8 +240,7 @@ fn write_once(stream: &mut TcpStream, response: &mut Response) {
     };
 }
 
-
-fn read_http_head(stream: &mut TcpStream) -> Result<(String, Option<Vec<u8>>),bool> {
+fn read_http_head(stream: &mut TcpStream) -> Result<(String, Option<Vec<u8>>), bool> {
     let mut buff: [u8; 1024] = [b'\0'; 1024];
     let mut head_string: String = String::new();
     loop {
