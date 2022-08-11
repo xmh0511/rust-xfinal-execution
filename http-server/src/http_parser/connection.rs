@@ -62,14 +62,74 @@ pub struct Request<'a> {
     pub(super) url: &'a str,
     pub(super) method: &'a str,
     pub(super) version: &'a str,
-	pub(super) body: BodyContent<'a>,
+    pub(super) body: BodyContent<'a>,
 }
 
 impl<'a> Request<'a> {
     pub fn get_header(&self, key: &str) -> Option<&str> {
-        match self.header_pair.get(key) {
-            Some(v) => Some(*v),
-            None => None,
+        let r = self.header_pair.keys().find(|&&ik| {
+            if ik.to_lowercase() == key.to_lowercase() {
+                true
+            } else {
+                false
+            }
+        });
+        match r {
+            Some(r) => {
+                return Some(self.header_pair.get(*r).unwrap());
+            }
+            None => {
+                return None;
+            }
+        }
+    }
+    pub fn get_headers(&self) -> HashMap<&str, &str> {
+        self.header_pair.clone()
+    }
+    pub fn get_version(&self) -> &str {
+        self.version
+    }
+    pub fn get_query(&self, k: &str) -> Option<&str> {
+        if let BodyContent::UrlForm(x) = &self.body {
+            let r = x.keys().find(|&&ik| {
+                if ik.to_lowercase() == k.to_lowercase() {
+                    true
+                } else {
+                    false
+                }
+            });
+            match r {
+                Some(r) => {
+                    return Some(x.get(*r).unwrap());
+                }
+                None => {
+                    return None;
+                }
+            }
+        } else {
+            None
+        }
+    }
+    pub fn get_queries(&self) -> Option<HashMap<&str, &str>> {
+        if let BodyContent::UrlForm(x) = &self.body {
+            Some(x.clone())
+        } else {
+            None
+        }
+    }
+    pub fn plain_body(&self) -> Option<&str> {
+        if let BodyContent::PureText(x) = self.body {
+            Some(x)
+        } else {
+            None
+        }
+    }
+
+    pub fn has_body(&self) -> bool {
+        if let BodyContent::None = self.body {
+            false
+        } else {
+            true
         }
     }
 }
@@ -119,7 +179,6 @@ impl<'a> Response<'a> {
 
     pub fn chunked() {}
 }
-
 
 #[derive(Debug)]
 pub enum BodyContent<'a> {
