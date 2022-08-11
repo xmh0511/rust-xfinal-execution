@@ -1,6 +1,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::collections::HashMap;
+use std::sync::{Arc};
 
 
 pub mod thread_pool;
@@ -31,7 +32,7 @@ impl HttpServer {
         Self {
             end_point: end,
             thread_number: count,
-			router:HashMap::new()
+			router:Arc::new(HashMap::new())
         }
     }
 

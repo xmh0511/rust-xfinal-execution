@@ -14,11 +14,11 @@ pub trait MiddleWare {
     fn call(&self, req: &Request, res: &mut Response) -> bool;
 }
 
-pub type MiddleWareVec = Vec<Arc<dyn MiddleWare + Send + Sync>>;
+pub type MiddleWareVec = Vec<Box<dyn MiddleWare + Send + Sync>>;
 
-pub type RouterValue = (Option<MiddleWareVec>, Arc<dyn Router + Send + Sync>);
+pub type RouterValue = (Option<MiddleWareVec>, Box<dyn Router + Send + Sync>);
 
-pub type RouterMap = HashMap<String, RouterValue>;
+pub type RouterMap = Arc<HashMap<String, RouterValue>>;
 
 pub fn handle_incoming((router, mut stream): (RouterMap, TcpStream)) {
     let mut head_content = read_http_head(&mut stream);
