@@ -677,8 +677,10 @@ fn separate_text_and_file<'a>(
         1 => {
             let rc = find_substr(&container, crlf, beg); // for "Content-disposition:...\r\n"
             if rc.find_pos != -1 {
-                let start = rc.find_pos as usize;
-                if !is_file(&container[start..rc.end_pos]) {
+                //let start = rc.find_pos as usize;
+				let diposition_slice = &container[beg..rc.end_pos];
+				println!("abc: {}",std::str::from_utf8(diposition_slice).unwrap());
+                if !is_file(diposition_slice) {
                     // text
                     let data_part_end = find_substr(&container, boundary_may_end, rc.end_pos);
                     if data_part_end.find_pos != -1 {
@@ -723,7 +725,9 @@ fn separate_text_and_file<'a>(
                 } else {
                     // file
                     // from rc.end_pos
-                    let file_content_type = find_substr(&container, crlf, rc.end_pos);
+					println!("is file");
+					let dcrlf = "\r\n\r\n".as_bytes();
+                    let file_content_type = find_substr(&container, dcrlf, rc.end_pos);
                     if file_content_type.find_pos != -1 {
                         // found Content-type:...\r\n
                         let start = file_content_type.find_pos as usize;
@@ -756,6 +760,7 @@ fn separate_text_and_file<'a>(
                                     state: 0,
                                 };
                             } else {
+								println!("partial data");
                                 let partial_data = &container[end..container_len];
                                 consume_to_file(
                                     stream,
@@ -771,9 +776,11 @@ fn separate_text_and_file<'a>(
                                     state: 0,
                                 };
                             }
-                        }
+                        }else{ //exact to read file data
+                            todo!()
+						}
                     } else {
-                        // not found found Content-type:...\r\n
+                        // not found found Content-type:...\r\n\r\n
                         return SperateState {
                             eof: false,
                             text_only: None,
