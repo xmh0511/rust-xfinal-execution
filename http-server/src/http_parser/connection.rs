@@ -1,4 +1,8 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::net::TcpStream;
+use std::ops::DerefMut;
+use std::rc::Rc;
 
 pub mod http_response_table {
     const STATE_TABLE: [(u16, &str); 19] = [
@@ -63,6 +67,7 @@ pub struct Request<'a> {
     pub(super) method: &'a str,
     pub(super) version: &'a str,
     pub(super) body: BodyContent<'a>,
+    pub(super) conn_: Rc<RefCell<&'a mut TcpStream>>,
 }
 
 impl<'a> Request<'a> {
@@ -132,6 +137,10 @@ impl<'a> Request<'a> {
             true
         }
     }
+
+    pub fn get_conn(&self) -> Rc<RefCell<&'a mut TcpStream>> {
+        Rc::clone(&self.conn_)
+    }
 }
 
 pub struct ResponseChunked<'b, 'a> {
@@ -152,6 +161,7 @@ pub struct Response<'a> {
     pub(super) http_state: u16,
     pub(super) body: Option<String>,
     pub(super) chunked: bool,
+    pub(super) conn_: Rc<RefCell<&'a mut TcpStream>>,
 }
 
 impl<'a> Response<'a> {
@@ -168,12 +178,10 @@ impl<'a> Response<'a> {
         s += "\r\n";
         match &self.body {
             Some(v) => {
-               s+=&*v;
-               s
-            },
-            None => {
+                s += &*v;
                 s
-            },
+            }
+            None => s,
         }
     }
 
@@ -184,13 +192,15 @@ impl<'a> Response<'a> {
         ResponseChunked { res: self }
     }
 
-    pub fn write_state(& mut self,code: u16){
+    pub fn write_state(&mut self, code: u16) {
         self.http_state = code;
         self.add_header(String::from("Content-length"), 0.to_string());
         self.body = None;
     }
 
-    pub fn chunked() {}
+    pub fn get_conn(&self) -> Rc<RefCell<&'a mut TcpStream>> {
+        Rc::clone(&self.conn_)
+    }
 }
 
 #[derive(Debug)]
@@ -200,3 +210,12 @@ pub enum BodyContent<'a> {
     None,
     Bad,
 }
+
+pub struct MultipleFormFile {
+	pub filename: String,
+    pub filepath: String,
+    pub content_type: String,
+    pub size: usize,
+}
+
+pub enum MultipleFormData {}

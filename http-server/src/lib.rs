@@ -6,7 +6,9 @@ pub mod thread_pool;
 
 mod http_parser;
 
-pub use http_parser::{MiddleWare, Request, Response, Router, RouterMap, RouterValue,ConnectionData,ConnectionConfig};
+pub use http_parser::{
+    ConnectionConfig, ConnectionData, MiddleWare, Request, Response, Router, RouterMap, RouterValue,
+};
 
 pub use macro_utilities::end_point;
 
@@ -66,13 +68,18 @@ impl HttpServer {
         }
     }
 
-    pub fn run(& mut self) {
+    pub fn run(&mut self) {
         let [a, b, c, d] = self.end_point.ip_address;
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(a, b, c, d)), self.end_point.port);
         let listen = TcpListener::bind(socket);
         self.not_found_default_if_not_set();
         let safe_router = Arc::new(self.router.clone());
-        let conn_data = Arc::new(ConnectionData{router_map:safe_router,conn_config:ConnectionConfig{read_time_out:5*1000}});
+        let conn_data = Arc::new(ConnectionData {
+            router_map: safe_router,
+            conn_config: ConnectionConfig {
+                read_time_out: 5 * 1000,
+            },
+        });
         match listen {
             Ok(x) => {
                 let mut pool =
@@ -105,20 +112,21 @@ impl HttpServer {
         }
     }
 
-    pub fn set_not_found<F>(& mut self,f: F)
+    pub fn set_not_found<F>(&mut self, f: F)
     where
         F: Router + Send + Sync + 'static,
     {
-        self.router.insert(String::from("NEVER_FOUND_FOR_ALL"), (None,Arc::new(f)));
+        self.router
+            .insert(String::from("NEVER_FOUND_FOR_ALL"), (None, Arc::new(f)));
     }
 
-    fn not_found_default_if_not_set(& mut self){
-       let r =  &self.router.get(&String::from("NEVER_FOUND_FOR_ALL"));
-       if let None = *r{
-          self.set_not_found(|req:&Request,res:& mut Response|{
-            res.write_state(404);
-          });
-       }
+    fn not_found_default_if_not_set(&mut self) {
+        let r = &self.router.get(&String::from("NEVER_FOUND_FOR_ALL"));
+        if let None = *r {
+            self.set_not_found(|req: &Request, res: &mut Response| {
+                res.write_state(404);
+            });
+        }
     }
 }
 

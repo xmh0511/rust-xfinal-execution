@@ -1,10 +1,15 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{prelude::*, ErrorKind};
 use std::net::{Shutdown, TcpStream};
+use std::ops::DerefMut;
+use std::rc::Rc;
 use std::sync::Arc;
 
+use uuid;
+
 pub mod connection;
-pub use connection::{BodyContent, Request, Response};
+pub use connection::{BodyContent, MultipleFormFile, Request, Response};
 
 pub trait Router {
     fn call(&self, req: &Request, res: &mut Response);
@@ -83,12 +88,14 @@ fn construct_http_event(
     body: BodyContent,
     _need_alive: bool,
 ) {
+    let conn = Rc::new(RefCell::new(stream));
     let request = Request {
         header_pair: head_map,
         url,
         method,
         version,
         body,
+        conn_: Rc::clone(&conn),
     };
     let mut response = Response {
         header_pair: HashMap::new(),
@@ -96,13 +103,15 @@ fn construct_http_event(
         http_state: 200,
         body: None,
         chunked: false,
+        conn_: Rc::clone(&conn),
     };
     do_router(&router, &request, &mut response);
     // if need_alive{
     //    response.add_header(String::from("Connection"), String::from("keep-alive"));
     // }
+    let mut stream = conn.borrow_mut();
     if !response.chunked {
-        write_once(stream, &mut response);
+        write_once(*stream, &mut response);
     } else {
         // chunked transfer
     }
@@ -130,10 +139,10 @@ fn is_keep_alive(head_map: &HashMap<&str, &str>) -> bool {
 }
 
 pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)) {
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(
+        conn_data.conn_config.read_time_out as u64,
+    )));
     'Back: loop {
-        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(
-            conn_data.conn_config.read_time_out as u64,
-        )));
         let read_result = read_http_head(&mut stream);
         if let Ok((mut head_content, possible_body)) = read_result {
             let head_result = parse_header(&mut head_content);
@@ -145,6 +154,9 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                             Some(partial_body) => {
                                 let mut body = partial_body;
                                 let body = read_body(&mut stream, &map, &mut body, size);
+                                if let BodyContent::Bad = body {
+                                    break;
+                                }
                                 //println!("{:?}", body);
                                 construct_http_event(
                                     &mut stream,
@@ -222,7 +234,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
             break;
         }
     }
-    //println!("total exit");
+    //println!("totally exit");
 }
 
 fn write_once(stream: &mut TcpStream, response: &mut Response) {
@@ -280,19 +292,17 @@ fn read_http_head(stream: &mut TcpStream) -> Result<(String, Option<Vec<u8>>), b
                     },
                 }
             }
-            Err(e) => {
-                match e.kind(){
-                    ErrorKind::TimedOut=>{
-                        return Err(true);
-                    },
-                    ErrorKind::WouldBlock=>{
-                        return Err(true);
-                    },
-                    _=>{
-                        return Err(false);
-                    }
+            Err(e) => match e.kind() {
+                ErrorKind::TimedOut => {
+                    return Err(true);
                 }
-            }
+                ErrorKind::WouldBlock => {
+                    return Err(true);
+                }
+                _ => {
+                    return Err(false);
+                }
+            },
         }
     }
 }
@@ -434,8 +444,9 @@ fn read_body_according_to_type<'a>(
     container: &'a mut Vec<u8>,
     mut need_read_size: usize,
 ) -> BodyContent<'a> {
+    //println!("raw:{body_type}");
     let tp = body_type.to_lowercase();
-    if tp != "multipart/form-data" {
+    if !tp.contains("multipart/form-data") {
         if need_read_size != 0 {
             let mut buf: [u8; 1024] = [b'\0'; 1024];
             loop {
@@ -468,7 +479,26 @@ fn read_body_according_to_type<'a>(
         }
     } else {
         // parse multiple form data
-        todo!()
+        let split = body_type.split_once(";");
+        match split {
+            Some((_, boundary)) => match boundary.trim().split_once("=") {
+                Some((_, boundary)) => {
+                    let boundary = format!("--{}", boundary.trim());
+                    println!("boundary: {}", boundary);
+                    let end_boundary = format!("{}--", &boundary);
+                    //println!("end boundary {}",end_boundary);
+                    read_multiple_form_body(
+                        stream,
+                        container,
+                        (&boundary, &end_boundary),
+                        need_read_size,
+                    );
+                    return BodyContent::Bad;
+                }
+                None => return BodyContent::Bad,
+            },
+            None => return BodyContent::Bad,
+        }
     };
 }
 
@@ -495,4 +525,351 @@ fn parse_url_form_body(container: &mut Vec<u8>) -> BodyContent<'_> {
             return BodyContent::Bad;
         }
     }
+}
+
+struct SperateState {
+    text_only: Option<Vec<u8>>,
+    eof: bool,
+    find_start: usize,
+    state: usize,
+}
+#[derive(Debug)]
+struct FindSet {
+    find_pos: i64,
+    end_pos: usize,
+}
+
+fn find_substr<'a>(slice: &'a [u8], sub: &'a [u8], start: usize) -> FindSet {
+    match slice[start..]
+        .windows(sub.len())
+        .position(|binaray| binaray == sub)
+    {
+        Some(pos) => {
+            let include_pos = (start + pos) as i64;
+            FindSet {
+                find_pos: include_pos,
+                end_pos: include_pos as usize + sub.len(),
+            }
+        }
+        None => FindSet {
+            find_pos: -1,
+            end_pos: 0,
+        },
+    }
+}
+
+fn is_file(slice: &[u8]) -> bool {
+    let key = "filename".as_bytes();
+    match slice.windows(key.len()).position(|x| x == key) {
+        Some(_) => true,
+        None => false,
+    }
+}
+
+fn parse_file_content_type(slice: &[u8]) -> (&str, &str) {
+    let s = std::str::from_utf8(slice).unwrap_or_else(|x| "");
+    match s.split_once(":") {
+        Some((k, v)) => {
+            return (k, v);
+        }
+        None => return ("", ""),
+    }
+}
+
+fn consume_to_file(
+    stream: &mut TcpStream,
+    need_size: &mut usize,
+    path: String,
+    partial: Option<&[u8]>,
+    boundary: &[u8],
+) {
+    let path = format!("./upload/{}", path);
+    let test_str = "--".as_bytes();
+    match std::fs::File::create(path) {
+        Ok(mut file) => {
+            if let Some(x) = partial {
+                let _ = file.write(x);
+            }
+            let mut read_pos = 0 as usize;
+            let mut eof = false;
+            let mut buff = [b'\0'; 1024];
+            while eof == false {
+                match stream.read(&mut buff[read_pos..]) {
+                    Ok(read_size) => {
+                        *need_size -= read_size;
+                        let r = find_substr(&buff, test_str, 0);
+                        if r.find_pos != -1 {
+                            let remainder = (1024 - r.find_pos) as usize;
+                            if remainder < boundary.len() {
+                                let mut temp: Vec<u8> = Vec::new();
+                                for i in r.find_pos..1024 {
+                                    let u = buff[i as usize];
+                                    temp.push(u);
+                                }
+                                let _ = file.write(&buff[0..r.find_pos as usize]);
+                                for (i, u) in temp.iter().enumerate() {
+                                    buff[i] = *u;
+                                }
+                                read_pos = remainder;
+                                continue;
+                            }
+                            match buff
+                                .windows(boundary.len())
+                                .position(|binary| boundary == binary)
+                            {
+                                Some(x) => {
+                                    eof = true;
+                                }
+                                None => {}
+                            }
+                        }
+                        let _ = file.write(&buff);
+                        read_pos = 0;
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                }
+            }
+        }
+        Err(_) => todo!(),
+    }
+}
+
+fn separate_text_and_file<'a>(
+    stream: &mut TcpStream,
+    container: &'a mut Vec<u8>,
+    (boundary, end): (&String, &String),
+    need_size: &mut usize,
+    state: usize,
+    beg: usize,
+) -> SperateState {
+    let crlf = "\r\n".as_bytes();
+    let boundary_may_end = boundary.as_bytes();
+    let boundary_divider = format!("{boundary}\r\n");
+    let boundary_divider_binary = boundary_divider.as_bytes();
+    let boundary_end = end.as_bytes();
+    //println!("state:{state}");
+    match state {
+        0 => {
+            let rb = find_substr(&container, boundary_divider_binary, beg);
+            //println!("invoke 586: {}",beg);
+            //println!("{}",std::str::from_utf8(&container[beg..]).unwrap());
+            if rb.find_pos != -1 {
+                // found "--boundary\r\n"
+
+                return SperateState {
+                    eof: false,
+                    text_only: None,
+                    find_start: rb.end_pos,
+                    state: 1,
+                };
+            } else {
+                let eof_boundary = find_substr(&container, boundary_end, beg);
+                return SperateState {
+                    eof: eof_boundary.find_pos != -1,
+                    text_only: None,
+                    find_start: 0,
+                    state: 0,
+                };
+            }
+        }
+        1 => {
+            let rc = find_substr(&container, crlf, beg); // for "Content-disposition:...\r\n"
+            if rc.find_pos != -1 {
+                let start = rc.find_pos as usize;
+                if !is_file(&container[start..rc.end_pos]) {
+                    // text
+                    let data_part_end = find_substr(&container, boundary_may_end, rc.end_pos);
+                    if data_part_end.find_pos != -1 {
+                        // found the end boundary of the data part
+
+                        //let eof_boundary = find_substr(&container, boundary_end, rc.end_pos);
+                        // println!("{:?}\n{:?}",data_part_end,eof_boundary);
+                        //panic!("end");
+                        //  found the data part end boundary
+                        // println!("{:?}", container.len());
+                        let end = data_part_end.find_pos as usize;
+                        let start = beg - boundary_divider_binary.len();
+                        //println!("{start}-{end}");
+                        let mut s: Vec<u8> = Vec::new();
+                        s.extend_from_slice(&container[start..end]);
+                        //println!("{}",std::str::from_utf8(&s).unwrap());
+                        //let eof = is_eof.find_pos != -1;
+                        //println!("{:?}",eof);
+                        //println!("{},{}",eof_boundary.find_pos,data_part_end.find_pos);
+
+                        // let mut eof = false;
+                        // if (eof_boundary.find_pos != -1)
+                        //     && (data_part_end.find_pos == eof_boundary.find_pos)
+                        // {
+                        //     eof = true;
+                        // }
+                        return SperateState {
+                            eof: false,
+                            text_only: Some(s),
+                            find_start: data_part_end.find_pos as usize,
+                            state: 0,
+                        };
+                    } else {
+                        // not found the end boundary of the data part
+                        return SperateState {
+                            eof: false,
+                            text_only: None,
+                            find_start: beg,
+                            state: 1,
+                        };
+                    }
+                } else {
+                    // file
+                    // from rc.end_pos
+                    let file_content_type = find_substr(&container, crlf, rc.end_pos);
+                    if file_content_type.find_pos != -1 {
+                        // found Content-type:...\r\n
+                        let start = file_content_type.find_pos as usize;
+                        let end = file_content_type.end_pos;
+                        let r = parse_file_content_type(&container[start..end]);
+                        let mut file = MultipleFormFile {
+                            filename: String::from(""),
+                            filepath: uuid::Uuid::new_v4().to_string(),
+                            content_type: String::from(r.1.trim()),
+                            size: 0,
+                        };
+                        let container_len = container.len();
+                        if container_len > file_content_type.end_pos {
+                            let try_end_boundary = find_substr(&container, boundary_may_end, end);
+                            if try_end_boundary.find_pos != -1 {
+                                // has all file content
+                                let _ = std::fs::create_dir("./upload");
+                                let path = format!("./upload/{}", file.filepath);
+                                let file_end = try_end_boundary.find_pos as usize;
+                                match std::fs::File::create(path) {
+                                    Ok(mut file) => {
+                                        let _ = file.write(&container[end..file_end]);
+                                    }
+                                    Err(_) => {}
+                                }
+                                return SperateState {
+                                    eof: false,
+                                    text_only: None,
+                                    find_start: file_end,
+                                    state: 0,
+                                };
+                            } else {
+                                let partial_data = &container[end..container_len];
+                                consume_to_file(
+                                    stream,
+                                    need_size,
+                                    file.filepath.clone(),
+                                    Some(partial_data),
+                                    boundary_may_end,
+                                );
+                                return SperateState {
+                                    eof: false,
+                                    text_only: None,
+                                    find_start: container_len - 1,
+                                    state: 0,
+                                };
+                            }
+                        }
+                    } else {
+                        // not found found Content-type:...\r\n
+                        return SperateState {
+                            eof: false,
+                            text_only: None,
+                            find_start: beg,
+                            state: 1,
+                        };
+                    }
+                    todo!()
+                }
+            } else {
+                // not yet get the data part
+                return SperateState {
+                    eof: false,
+                    text_only: None,
+                    find_start: beg,
+                    state: 1,
+                };
+            }
+        }
+        _ => {
+            todo!()
+        }
+    }
+}
+
+fn read_multiple_form_body(
+    stream: &mut TcpStream,
+    container: &mut Vec<u8>,
+    (boundary, end): (&String, &String),
+    mut need_size: usize,
+) {
+    //println!("need_size {need_size}");
+    let mut start = 0 as usize;
+    let mut state = 0 as usize;
+    let mut eof = false;
+    let mut only_text: Vec<u8> = Vec::new();
+    if need_size != 0 {
+        //println!("before size:{}",container.len());
+        let mut buff: [u8; 1024] = [b'\0'; 1024];
+        while eof == false {
+            if need_size != 0 {
+                match stream.read(&mut buff) {
+                    Ok(read_size) => {
+                        //println!("continue read:{read_size}");
+                        container.extend_from_slice(&buff[..read_size]);
+                        need_size -= read_size;
+                    }
+                    Err(_) => {}
+                }
+            }
+            //println!("after size:{}", container.len());
+            //println!("{}",std::str::from_utf8(&container).unwrap());
+            //println!("is eof: {:?}", eof);
+            let r = separate_text_and_file(
+                stream,
+                container,
+                (boundary, end),
+                &mut need_size,
+                state,
+                start,
+            );
+            //println!("-------------697");
+            start = r.find_start;
+            state = r.state;
+            eof = r.eof;
+            match r.text_only {
+                Some(x) => {
+                    // println!("{}", std::str::from_utf8(&x).unwrap());
+                    only_text.extend_from_slice(&x);
+                }
+                None => {}
+            }
+            //println!("------------------------------");
+        }
+    } else {
+        // everything has been read out
+        //println!("all complete");
+        while eof == false {
+            let r = separate_text_and_file(
+                stream,
+                container,
+                (boundary, end),
+                &mut need_size,
+                state,
+                start,
+            );
+            start = r.find_start;
+            state = r.state;
+            eof = r.eof;
+            match r.text_only {
+                Some(x) => {
+                    only_text.extend_from_slice(&x);
+                }
+                None => {}
+            }
+        }
+    }
+    println!("{}", std::str::from_utf8(&only_text).unwrap());
 }
