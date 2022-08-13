@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fs::OpenOptions;
 use std::io::{prelude::*, ErrorKind};
 use std::net::{Shutdown, TcpStream};
 use std::ops::DerefMut;
@@ -582,10 +583,16 @@ fn consume_to_file(
     path: String,
     partial: Option<&[u8]>,
     boundary: &[u8],
-) {
+) -> Option<Vec<u8>> {
     let path = format!("./upload/{}", path);
+    //println!("path:{path}");
     let test_str = "--".as_bytes();
-    match std::fs::File::create(path) {
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(path);
+    match file {
         Ok(mut file) => {
             if let Some(x) = partial {
                 let _ = file.write(x);
@@ -596,6 +603,7 @@ fn consume_to_file(
             while eof == false {
                 match stream.read(&mut buff[read_pos..]) {
                     Ok(read_size) => {
+                        //println!("read from stream, size:{read_size}");
                         *need_size -= read_size;
                         let r = find_substr(&buff, test_str, 0);
                         if r.find_pos != -1 {
@@ -611,28 +619,75 @@ fn consume_to_file(
                                     buff[i] = *u;
                                 }
                                 read_pos = remainder;
-                                continue;
-                            }
-                            match buff
-                                .windows(boundary.len())
-                                .position(|binary| boundary == binary)
-                            {
-                                Some(x) => {
-                                    eof = true;
+                            } else {
+                                // can be completely compare with boundary
+                                match buff
+                                    .windows(boundary.len())
+                                    .position(|binary| boundary == binary)
+                                {
+                                    Some(pos) => {
+                                        if r.find_pos > 0 {
+                                            let _ = file.write(&buff[..pos]);
+                                        }
+                                        let mut may_end = Vec::new();
+                                        may_end.extend_from_slice(&buff[pos..]);
+                                        //eof = true;
+                                        return Some(may_end);
+                                    }
+                                    None => {
+                                        // if that data is not boundary, can write all
+                                        let _ = file.write(&buff);
+                                        read_pos = 0;
+                                    }
                                 }
-                                None => {}
                             }
+                        } else {
+                            // can completely write to file if -- is not found
+                            let _ = file.write(&buff);
+                            read_pos = 0;
                         }
-                        let _ = file.write(&buff);
-                        read_pos = 0;
                     }
                     Err(_) => {
-                        break;
+                        println!("cannot read file data from stream ");
+                        panic!("");
                     }
                 }
             }
         }
         Err(_) => todo!(),
+    }
+    None
+}
+
+fn consume_to_file_help(
+    stream: &mut TcpStream,
+    need_size: &mut usize,
+    path: String,
+    partial: Option<&[u8]>,
+    boundary: &[u8],
+    container: & mut Vec<u8>,
+) -> SperateState {
+    match consume_to_file(
+        stream,
+        need_size,
+        path,
+        partial,
+        boundary,
+    ) {
+        Some(x) => {
+            println!("after consume_to_file, need_size={need_size}");
+            container.clear();
+            container.extend_from_slice(&x);
+            return SperateState {
+                eof: false,
+                text_only: None,
+                find_start: 0,
+                state: 0,
+            };
+        }
+        None => {
+            unreachable!();
+        }
     }
 }
 
@@ -678,8 +733,11 @@ fn separate_text_and_file<'a>(
             let rc = find_substr(&container, crlf, beg); // for "Content-disposition:...\r\n"
             if rc.find_pos != -1 {
                 //let start = rc.find_pos as usize;
-				let diposition_slice = &container[beg..rc.end_pos];
-				println!("abc: {}",std::str::from_utf8(diposition_slice).unwrap());
+                let diposition_slice = &container[beg..rc.end_pos];
+                println!(
+                    "disposition: {}",
+                    std::str::from_utf8(diposition_slice).unwrap()
+                );
                 if !is_file(diposition_slice) {
                     // text
                     let data_part_end = find_substr(&container, boundary_may_end, rc.end_pos);
@@ -725,8 +783,8 @@ fn separate_text_and_file<'a>(
                 } else {
                     // file
                     // from rc.end_pos
-					println!("is file");
-					let dcrlf = "\r\n\r\n".as_bytes();
+                    println!("is file");
+                    let dcrlf = "\r\n\r\n".as_bytes();
                     let file_content_type = find_substr(&container, dcrlf, rc.end_pos);
                     if file_content_type.find_pos != -1 {
                         // found Content-type:...\r\n
@@ -744,7 +802,6 @@ fn separate_text_and_file<'a>(
                             let try_end_boundary = find_substr(&container, boundary_may_end, end);
                             if try_end_boundary.find_pos != -1 {
                                 // has all file content
-                                let _ = std::fs::create_dir("./upload");
                                 let path = format!("./upload/{}", file.filepath);
                                 let file_end = try_end_boundary.find_pos as usize;
                                 match std::fs::File::create(path) {
@@ -760,25 +817,23 @@ fn separate_text_and_file<'a>(
                                     state: 0,
                                 };
                             } else {
-								println!("partial data");
-                                let partial_data = &container[end..container_len];
-                                consume_to_file(
-                                    stream,
-                                    need_size,
-                                    file.filepath.clone(),
-                                    Some(partial_data),
-                                    boundary_may_end,
-                                );
-                                return SperateState {
-                                    eof: false,
-                                    text_only: None,
-                                    find_start: container_len - 1,
-                                    state: 0,
-                                };
+                                println!("partial data");
+                                let mut partial = Vec::new();
+                                partial.extend_from_slice( &container[end..container_len]);
+                                return consume_to_file_help(stream,need_size,file.filepath.clone(),Some(&partial),boundary_may_end,container);
+                                // println!("consume_to_file complete");
+                                //println!("container-length:{}, next start{}",container.len(),container_len - 1);
+                                // return SperateState {
+                                //     eof: false,
+                                //     text_only: None,
+                                //     find_start: container_len - 1,
+                                //     state: 0,
+                                // };
                             }
-                        }else{ //exact to read file data
-                            todo!()
-						}
+                        } else {
+                            //exactly need to read file data
+                            return consume_to_file_help(stream,need_size,file.filepath.clone(),None,boundary_may_end,container);
+                        }
                     } else {
                         // not found found Content-type:...\r\n\r\n
                         return SperateState {
@@ -788,7 +843,7 @@ fn separate_text_and_file<'a>(
                             state: 1,
                         };
                     }
-                    todo!()
+                    //todo!()
                 }
             } else {
                 // not yet get the data part

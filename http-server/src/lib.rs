@@ -61,6 +61,7 @@ impl<'a> RouterRegister<'a> {
 
 impl HttpServer {
     pub fn create(end: EndPoint, count: u16) -> Self {
+        let _ = std::fs::create_dir("./upload");
         Self {
             end_point: end,
             thread_number: count,
