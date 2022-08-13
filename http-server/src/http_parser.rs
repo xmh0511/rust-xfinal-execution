@@ -588,69 +588,96 @@ fn consume_to_file(
 ) -> Option<Vec<u8>> {
     //let path = format!("./upload/{}", path);
     //println!("path:{path}");
-    let test_str = "\r".as_bytes();
+    let cr_key = b"\r";
+    let mut crlf_boundary = Vec::new();
+    crlf_boundary.push(b'\r');
+    crlf_boundary.push(b'\n');
+    crlf_boundary.extend_from_slice(boundary);
+    let crlf_boundary = crlf_boundary;
+    let crlf_boundary = crlf_boundary.as_slice();
     let file = OpenOptions::new().write(true).create(true).open(path);
-    let complete_test_len = 2 + boundary.len(); // \r\n--Boundary
+    let crlf_boundary_len = crlf_boundary.len(); // \r\n--Boundary
+    println!("crlf_boundary_len {crlf_boundary_len}");
     match file {
         Ok(mut file) => {
             if let Some(x) = partial {
                 let _ = file.write(x);
             }
-            let mut read_pos = 0 as usize;
             //let mut eof = false;
             let mut buff = [b'\0'; 1024];
+            let mut precede_buff:Vec<u8> = Vec::new();
             loop {
-                match stream.read(&mut buff[read_pos..]) {
+                match stream.read(&mut buff) {
                     Ok(read_size) => {
                         //println!("read from stream, size:{read_size}");
+                        // if read_pos!=0{
+                        //     println!("write pos:{read_pos}, size:{read_size}");
+                        // }
+                        let read_out_data = &buff[..read_size];
                         *need_size -= read_size;
-                        let data_end_pos = read_pos + read_size;
-                        let r = find_substr(&buff[..data_end_pos], test_str, 0);
-                        if r.find_pos != -1 {
-                            let test_start = r.find_pos as usize;
-                            let remainder = data_end_pos - test_start;
-                            if remainder < complete_test_len {
-                                let mut temp = [b'\0'; 1024];
-                                let mut index = 0;
-                                for i in test_start..data_end_pos {
-                                    let u = buff[i];
-                                    temp[index] = u;
-                                    index += 1;
-                                }
-                                let _ = file.write(&buff[0..test_start]);
-                                let mut id = 0;
-                                for u in &temp[..index] {
-                                    buff[id] = *u;
-                                    id += 1;
-                                }
-                                read_pos = remainder;
+                        
+                        //let data_end_pos = read_size;
+
+                        if precede_buff.len() !=0{
+                            let copy_back = precede_buff.clone();
+                            precede_buff.extend_from_slice(read_out_data);
+                            let r = find_substr(&precede_buff, crlf_boundary, 0);
+                            if r.find_pos != -1{
+                                let mut may_end = Vec::new();
+                                may_end.extend_from_slice(&precede_buff[2..]);
+                                //eof = true;
+                                return Some(may_end);
+                            }else{
+                                let _ = file.write(&copy_back);
+                                precede_buff.clear();
+                            }
+                        }
+
+                        let cr_key_pos: i64 = {
+                            match read_out_data
+                                .windows(cr_key.len())
+                                .position(|key| key == cr_key)
+                            {
+                                Some(pos) => pos as i64,
+                                None => -1,
+                            }
+                        };
+                        if cr_key_pos != -1 {
+                            let cr_key_pos = cr_key_pos as usize;
+                            let can_compare_len = read_size - cr_key_pos;
+                            if can_compare_len < crlf_boundary_len {
+                                let _ = file.write(&buff[0..cr_key_pos]).unwrap();
+
+                                precede_buff.extend_from_slice(&read_out_data[cr_key_pos..]);
+
+                                continue;
                             } else {
                                 // can be completely compare with boundary
-                                match buff
-                                    .windows(boundary.len())
-                                    .position(|binary| boundary == binary)
+                                match read_out_data
+                                    .windows(crlf_boundary.len())
+                                    .position(|binary| crlf_boundary == binary)
                                 {
                                     Some(pos) => {
-                                        if r.find_pos > 0 {
-                                            let _ = file.write(&buff[..pos - 2]);
-                                            // file_data\r\n--Boundary
-                                        }
+                                        //println!("\\r\\n");
+                                        let _ = file.write(&read_out_data[..pos]);
+
                                         let mut may_end = Vec::new();
-                                        may_end.extend_from_slice(&buff[pos..data_end_pos]);
+                                        may_end.extend_from_slice(&read_out_data[pos + 2..]);
                                         //eof = true;
                                         return Some(may_end);
                                     }
                                     None => {
                                         // if that data is not boundary, can write all
-                                        let _ = file.write(&buff[..data_end_pos]);
-                                        read_pos = 0;
+                                        //println!("if that data is not boundary, can write all");
+                                        let _ = file.write(read_out_data);
+                                        continue;
                                     }
                                 }
                             }
                         } else {
                             // can completely write to file if -- is not found
-                            let _ = file.write(&buff[..data_end_pos]);
-                            read_pos = 0;
+                            let _ = file.write(read_out_data);
+                            continue;
                         }
                     }
                     Err(_) => {
