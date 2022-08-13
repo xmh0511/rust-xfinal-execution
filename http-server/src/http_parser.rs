@@ -610,18 +610,18 @@ fn consume_to_file(
                             let test_start = r.find_pos as usize;
                             let remainder = data_end_pos - test_start;
                             if remainder < complete_test_len {
-                                let mut temp = [b'\0';1024];
+                                let mut temp = [b'\0'; 1024];
                                 let mut index = 0;
                                 for i in test_start..data_end_pos {
                                     let u = buff[i];
                                     temp[index] = u;
-                                    index+=1;
+                                    index += 1;
                                 }
                                 let _ = file.write(&buff[0..test_start]);
                                 let mut id = 0;
                                 for u in &temp[..index] {
                                     buff[id] = *u;
-                                    id+=1;
+                                    id += 1;
                                 }
                                 read_pos = remainder;
                             } else {
@@ -988,6 +988,7 @@ fn read_multiple_form_body(
             eof = r.eof;
             match r.text_only {
                 Some(x) => {
+                    //println!("{:?}\n------------------------",&x);
                     only_text.extend_from_slice(&x);
                 }
                 None => {}
