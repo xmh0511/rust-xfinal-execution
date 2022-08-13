@@ -588,8 +588,9 @@ fn consume_to_file(
 ) -> Option<Vec<u8>> {
     //let path = format!("./upload/{}", path);
     //println!("path:{path}");
-    let test_str = "--".as_bytes();
+    let test_str = "\r".as_bytes();
     let file = OpenOptions::new().write(true).create(true).open(path);
+    let complete_test_len = 2 + boundary.len(); // \r\n--Boundary
     match file {
         Ok(mut file) => {
             if let Some(x) = partial {
@@ -608,15 +609,19 @@ fn consume_to_file(
                         if r.find_pos != -1 {
                             let test_start = r.find_pos as usize;
                             let remainder = data_end_pos - test_start;
-                            if remainder < boundary.len() {
-                                let mut temp: Vec<u8> = Vec::new();
+                            if remainder < complete_test_len {
+                                let mut temp = [b'\0';1024];
+                                let mut index = 0;
                                 for i in test_start..data_end_pos {
                                     let u = buff[i];
-                                    temp.push(u);
+                                    temp[index] = u;
+                                    index+=1;
                                 }
                                 let _ = file.write(&buff[0..test_start]);
-                                for (i, u) in temp.iter().enumerate() {
-                                    buff[i] = *u;
+                                let mut id = 0;
+                                for u in &temp[..index] {
+                                    buff[id] = *u;
+                                    id+=1;
                                 }
                                 read_pos = remainder;
                             } else {
