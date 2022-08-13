@@ -590,7 +590,6 @@ fn consume_to_file(
     let file = OpenOptions::new()
         .write(true)
         .create(true)
-        .append(true)
         .open(path);
     match file {
         Ok(mut file) => {
@@ -598,9 +597,9 @@ fn consume_to_file(
                 let _ = file.write(x);
             }
             let mut read_pos = 0 as usize;
-            let mut eof = false;
+            //let mut eof = false;
             let mut buff = [b'\0'; 1024];
-            while eof == false {
+            loop {
                 match stream.read(&mut buff[read_pos..]) {
                     Ok(read_size) => {
                         //println!("read from stream, size:{read_size}");
@@ -627,7 +626,7 @@ fn consume_to_file(
                                 {
                                     Some(pos) => {
                                         if r.find_pos > 0 {
-                                            let _ = file.write(&buff[..pos]);
+                                            let _ = file.write(&buff[..pos-2]); // \r\n--Boundary
                                         }
                                         let mut may_end = Vec::new();
                                         may_end.extend_from_slice(&buff[pos..]);
