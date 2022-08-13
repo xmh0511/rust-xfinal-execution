@@ -211,11 +211,12 @@ pub enum BodyContent<'a> {
     Bad,
 }
 
+#[derive(Debug)]
 pub struct MultipleFormFile {
 	pub filename: String,
     pub filepath: String,
     pub content_type: String,
-    pub size: usize,
+    pub form_indice:String
 }
 
 pub enum MultipleFormData {}

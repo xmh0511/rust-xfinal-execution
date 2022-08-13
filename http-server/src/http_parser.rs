@@ -568,7 +568,9 @@ fn is_file(slice: &[u8]) -> bool {
 }
 
 fn parse_file_content_type(slice: &[u8]) -> (&str, &str) {
+    //println!("571 {}",std::str::from_utf8(slice).unwrap());
     let s = std::str::from_utf8(slice).unwrap_or_else(|x| "");
+    //println!("572 {s}");
     match s.split_once(":") {
         Some((k, v)) => {
             return (k, v);
@@ -584,13 +586,10 @@ fn consume_to_file(
     partial: Option<&[u8]>,
     boundary: &[u8],
 ) -> Option<Vec<u8>> {
-    let path = format!("./upload/{}", path);
+    //let path = format!("./upload/{}", path);
     //println!("path:{path}");
     let test_str = "--".as_bytes();
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(path);
+    let file = OpenOptions::new().write(true).create(true).open(path);
     match file {
         Ok(mut file) => {
             if let Some(x) = partial {
@@ -604,16 +603,18 @@ fn consume_to_file(
                     Ok(read_size) => {
                         //println!("read from stream, size:{read_size}");
                         *need_size -= read_size;
-                        let r = find_substr(&buff, test_str, 0);
+                        let data_end_pos = read_pos + read_size;
+                        let r = find_substr(&buff[..data_end_pos], test_str, 0);
                         if r.find_pos != -1 {
-                            let remainder = (1024 - r.find_pos) as usize;
+                            let test_start = r.find_pos as usize;
+                            let remainder = data_end_pos - test_start;
                             if remainder < boundary.len() {
                                 let mut temp: Vec<u8> = Vec::new();
-                                for i in r.find_pos..1024 {
-                                    let u = buff[i as usize];
+                                for i in test_start ..data_end_pos {
+                                    let u = buff[i];
                                     temp.push(u);
                                 }
-                                let _ = file.write(&buff[0..r.find_pos as usize]);
+                                let _ = file.write(&buff[0..test_start]);
                                 for (i, u) in temp.iter().enumerate() {
                                     buff[i] = *u;
                                 }
@@ -626,23 +627,23 @@ fn consume_to_file(
                                 {
                                     Some(pos) => {
                                         if r.find_pos > 0 {
-                                            let _ = file.write(&buff[..pos-2]); // \r\n--Boundary
+                                            let _ = file.write(&buff[..pos - 2]); // file_data\r\n--Boundary
                                         }
                                         let mut may_end = Vec::new();
-                                        may_end.extend_from_slice(&buff[pos..]);
+                                        may_end.extend_from_slice(&buff[pos..data_end_pos]);
                                         //eof = true;
                                         return Some(may_end);
                                     }
                                     None => {
                                         // if that data is not boundary, can write all
-                                        let _ = file.write(&buff);
+                                        let _ = file.write(&buff[..data_end_pos]);
                                         read_pos = 0;
                                     }
                                 }
                             }
                         } else {
                             // can completely write to file if -- is not found
-                            let _ = file.write(&buff);
+                            let _ = file.write(&buff[..data_end_pos]);
                             read_pos = 0;
                         }
                     }
@@ -655,7 +656,6 @@ fn consume_to_file(
         }
         Err(_) => todo!(),
     }
-    None
 }
 
 fn consume_to_file_help(
@@ -664,17 +664,11 @@ fn consume_to_file_help(
     path: String,
     partial: Option<&[u8]>,
     boundary: &[u8],
-    container: & mut Vec<u8>,
+    container: &mut Vec<u8>,
 ) -> SperateState {
-    match consume_to_file(
-        stream,
-        need_size,
-        path,
-        partial,
-        boundary,
-    ) {
+    match consume_to_file(stream, need_size, path, partial, boundary) {
         Some(x) => {
-            println!("after consume_to_file, need_size={need_size}");
+            //println!("after consume_to_file, need_size= {:?}\r\n{:?}",x,boundary);
             container.clear();
             container.extend_from_slice(&x);
             return SperateState {
@@ -688,6 +682,36 @@ fn consume_to_file_help(
             unreachable!();
         }
     }
+}
+
+fn get_file_config(s: &str) -> (String, String) {
+    //println!("file disposition: {}", s);
+    let name = "name=\"";
+    let r = match s.find(name) {
+        Some(pos) => {
+            let pos = pos + name.len();
+            let name_end = "\"";
+            match s[pos..].find(name_end) {
+                Some(pos_end) => (String::from(&s[pos..pos + pos_end]), pos_end),
+                None => todo!(),
+            }
+        }
+        None => todo!(),
+    };
+    let file_name_key = "filename=\"";
+    let bias = r.1 + 2;
+    let filename = match s[bias..].find(file_name_key) {
+        Some(pos) => {
+            let pos = bias + pos + file_name_key.len();
+            let end = "\"";
+            match s[pos..].find(end) {
+                Some(end) => String::from(&s[pos..pos + end]),
+                None => todo!(),
+            }
+        }
+        None => todo!(),
+    };
+    (r.0, filename)
 }
 
 fn separate_text_and_file<'a>(
@@ -733,37 +757,26 @@ fn separate_text_and_file<'a>(
             if rc.find_pos != -1 {
                 //let start = rc.find_pos as usize;
                 let diposition_slice = &container[beg..rc.end_pos];
-                println!(
-                    "disposition: {}",
-                    std::str::from_utf8(diposition_slice).unwrap()
-                );
+                let diposition_str = match std::str::from_utf8(diposition_slice) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        panic!("diposition is not a valid utf8 string")
+                    }
+                };
+                //println!("disposition: {}", diposition_str);
                 if !is_file(diposition_slice) {
                     // text
                     let data_part_end = find_substr(&container, boundary_may_end, rc.end_pos);
                     if data_part_end.find_pos != -1 {
                         // found the end boundary of the data part
 
-                        //let eof_boundary = find_substr(&container, boundary_end, rc.end_pos);
-                        // println!("{:?}\n{:?}",data_part_end,eof_boundary);
-                        //panic!("end");
-                        //  found the data part end boundary
-                        // println!("{:?}", container.len());
+
                         let end = data_part_end.find_pos as usize;
                         let start = beg - boundary_divider_binary.len();
                         //println!("{start}-{end}");
                         let mut s: Vec<u8> = Vec::new();
                         s.extend_from_slice(&container[start..end]);
-                        //println!("{}",std::str::from_utf8(&s).unwrap());
-                        //let eof = is_eof.find_pos != -1;
-                        //println!("{:?}",eof);
-                        //println!("{},{}",eof_boundary.find_pos,data_part_end.find_pos);
 
-                        // let mut eof = false;
-                        // if (eof_boundary.find_pos != -1)
-                        //     && (data_part_end.find_pos == eof_boundary.find_pos)
-                        // {
-                        //     eof = true;
-                        // }
                         return SperateState {
                             eof: false,
                             text_only: Some(s),
@@ -781,31 +794,43 @@ fn separate_text_and_file<'a>(
                     }
                 } else {
                     // file
-                    // from rc.end_pos
+                    // from rc.end_pos   Content-disposition:...\r\n <- this point
                     println!("is file");
                     let dcrlf = "\r\n\r\n".as_bytes();
                     let file_content_type = find_substr(&container, dcrlf, rc.end_pos);
                     if file_content_type.find_pos != -1 {
-                        // found Content-type:...\r\n
+                        // found Content-type:...\r\n\r\n
                         let start = file_content_type.find_pos as usize;
                         let end = file_content_type.end_pos;
-                        let r = parse_file_content_type(&container[start..end]);
-                        let mut file = MultipleFormFile {
-                            filename: String::from(""),
-                            filepath: uuid::Uuid::new_v4().to_string(),
-                            content_type: String::from(r.1.trim()),
-                            size: 0,
+                        //println!("{start}-{end}, value:{:?}",&container[rc.end_pos..start]);
+                        let r = parse_file_content_type(&container[rc.end_pos..start]);
+                        let file_config = get_file_config(diposition_str);
+                        let file_extension = match file_config.1.rfind(".") {
+                            Some(pos) => {
+                                &file_config.1[pos..]
+                            },
+                            None => "",
                         };
+
+
+                        let file = MultipleFormFile {
+                            filename: file_config.1.clone(),
+                            filepath: format!("./upload/{}{}",uuid::Uuid::new_v4().to_string(),file_extension),
+                            content_type: String::from(r.1.trim()),
+                            form_indice: file_config.0,
+                        };
+                        println!("file config {:?}\n------------------------------------", file);
                         let container_len = container.len();
                         if container_len > file_content_type.end_pos {
                             let try_end_boundary = find_substr(&container, boundary_may_end, end);
                             if try_end_boundary.find_pos != -1 {
                                 // has all file content
-                                let path = format!("./upload/{}", file.filepath);
+
                                 let file_end = try_end_boundary.find_pos as usize;
-                                match std::fs::File::create(path) {
+                                let file = OpenOptions::new().write(true).create(true).open(file.filepath.clone());
+                                match file {
                                     Ok(mut file) => {
-                                        let _ = file.write(&container[end..file_end]);
+                                        let _ = file.write(&container[end..file_end-2]);  // \r\n--Boundary
                                     }
                                     Err(_) => {}
                                 }
@@ -815,11 +840,22 @@ fn separate_text_and_file<'a>(
                                     find_start: file_end,
                                     state: 0,
                                 };
-                            } else {
+                            } else {  // --Boundary\r\nContent-disposition:..\r\nContent-type:...\r\n\r\n...
                                 println!("partial data");
+
+                                // if file.form_indice == "file3"{
+                                //     println!("partial data is : {:?}",&container[end..container_len]);
+                                // }
                                 let mut partial = Vec::new();
-                                partial.extend_from_slice( &container[end..container_len]);
-                                return consume_to_file_help(stream,need_size,file.filepath.clone(),Some(&partial),boundary_may_end,container);
+                                partial.extend_from_slice(&container[end..container_len]);
+                                return consume_to_file_help(
+                                    stream,
+                                    need_size,
+                                    file.filepath.clone(),
+                                    Some(&partial),
+                                    boundary_may_end,
+                                    container,
+                                );
                                 // println!("consume_to_file complete");
                                 //println!("container-length:{}, next start{}",container.len(),container_len - 1);
                                 // return SperateState {
@@ -831,7 +867,15 @@ fn separate_text_and_file<'a>(
                             }
                         } else {
                             //exactly need to read file data
-                            return consume_to_file_help(stream,need_size,file.filepath.clone(),None,boundary_may_end,container);
+                            //println!("exactly need to read file data");
+                            return consume_to_file_help(
+                                stream,
+                                need_size,
+                                file.filepath.clone(),
+                                None,
+                                boundary_may_end,
+                                container,
+                            );
                         }
                     } else {
                         // not found found Content-type:...\r\n\r\n
