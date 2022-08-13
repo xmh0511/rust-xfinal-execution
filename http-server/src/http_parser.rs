@@ -610,7 +610,7 @@ fn consume_to_file(
                             let remainder = data_end_pos - test_start;
                             if remainder < boundary.len() {
                                 let mut temp: Vec<u8> = Vec::new();
-                                for i in test_start ..data_end_pos {
+                                for i in test_start..data_end_pos {
                                     let u = buff[i];
                                     temp.push(u);
                                 }
@@ -627,7 +627,8 @@ fn consume_to_file(
                                 {
                                     Some(pos) => {
                                         if r.find_pos > 0 {
-                                            let _ = file.write(&buff[..pos - 2]); // file_data\r\n--Boundary
+                                            let _ = file.write(&buff[..pos - 2]);
+                                            // file_data\r\n--Boundary
                                         }
                                         let mut may_end = Vec::new();
                                         may_end.extend_from_slice(&buff[pos..data_end_pos]);
@@ -770,7 +771,6 @@ fn separate_text_and_file<'a>(
                     if data_part_end.find_pos != -1 {
                         // found the end boundary of the data part
 
-
                         let end = data_part_end.find_pos as usize;
                         let start = beg - boundary_divider_binary.len();
                         //println!("{start}-{end}");
@@ -805,21 +805,29 @@ fn separate_text_and_file<'a>(
                         //println!("{start}-{end}, value:{:?}",&container[rc.end_pos..start]);
                         let r = parse_file_content_type(&container[rc.end_pos..start]);
                         let file_config = get_file_config(diposition_str);
+                        if file_config.1 == "" || file_config.0 == "" || r.1 == "" {
+                            // invalid file upload request
+                            unimplemented!("invalid file upload request")
+                        }
                         let file_extension = match file_config.1.rfind(".") {
-                            Some(pos) => {
-                                &file_config.1[pos..]
-                            },
+                            Some(pos) => &file_config.1[pos..],
                             None => "",
                         };
 
-
                         let file = MultipleFormFile {
                             filename: file_config.1.clone(),
-                            filepath: format!("./upload/{}{}",uuid::Uuid::new_v4().to_string(),file_extension),
+                            filepath: format!(
+                                "./upload/{}{}",
+                                uuid::Uuid::new_v4().to_string(),
+                                file_extension
+                            ),
                             content_type: String::from(r.1.trim()),
                             form_indice: file_config.0,
                         };
-                        println!("file config {:?}\n------------------------------------", file);
+                        println!(
+                            "file config {:?}\n------------------------------------",
+                            file
+                        );
                         let container_len = container.len();
                         if container_len > file_content_type.end_pos {
                             let try_end_boundary = find_substr(&container, boundary_may_end, end);
@@ -827,10 +835,14 @@ fn separate_text_and_file<'a>(
                                 // has all file content
 
                                 let file_end = try_end_boundary.find_pos as usize;
-                                let file = OpenOptions::new().write(true).create(true).open(file.filepath.clone());
+                                let file = OpenOptions::new()
+                                    .write(true)
+                                    .create(true)
+                                    .open(file.filepath.clone());
                                 match file {
                                     Ok(mut file) => {
-                                        let _ = file.write(&container[end..file_end-2]);  // \r\n--Boundary
+                                        let _ = file.write(&container[end..file_end - 2]);
+                                        // \r\n--Boundary
                                     }
                                     Err(_) => {}
                                 }
@@ -840,7 +852,8 @@ fn separate_text_and_file<'a>(
                                     find_start: file_end,
                                     state: 0,
                                 };
-                            } else {  // --Boundary\r\nContent-disposition:..\r\nContent-type:...\r\n\r\n...
+                            } else {
+                                // --Boundary\r\nContent-disposition:..\r\nContent-type:...\r\n\r\n...
                                 println!("partial data");
 
                                 // if file.form_indice == "file3"{
