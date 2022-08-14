@@ -1095,11 +1095,13 @@ fn read_multiple_form_body(
                                                 }
                                             }else{
                                                 let need = crlf_boundary_sequence.len() - compare_len;
-                                                let mut need_buff = vec![b'\0';need];
-                                                match stream.read_exact(&mut need_buff) {
-                                                    Ok(_) => {
+                                                let mut need_buff = vec![b'\0';1024];
+                                                println!("1099: {:?}",&buffs[pos..]);
+                                                println!("need size:{}",need_size);
+                                                match stream.read(&mut need_buff) {
+                                                    Ok(size) => {
                                                         need_size -= need;
-                                                        buffs.extend_from_slice(&file_buff);
+                                                        buffs.extend_from_slice(&need_buff[..size]);
                                                         let r = find_substr(&buffs, &crlf_boundary_sequence, pos);
                                                         if r.find_pos!=-1{
                                                             let pos = r.find_pos as usize;
@@ -1114,7 +1116,7 @@ fn read_multiple_form_body(
                                                             let mut temp = Vec::new();
                                                             temp.extend_from_slice(&buffs[pos+2..]);
                                                             buffs = temp;
-                                                            continue 'Outer;
+                                                            continue;
                                                         }
                                                     }
                                                     Err(_) => todo!(),
@@ -1152,6 +1154,7 @@ fn read_multiple_form_body(
         }
     }
     if need_size != 0 {
+        println!("{:?}",buffs);
         let mut buff = [b'\0'; 10];
         match stream.read(&mut buff) {
             Ok(_) => {}
