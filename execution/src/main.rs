@@ -3,7 +3,7 @@ use http_server::{
 };
 
 fn main() {
-    let mut http_server = HttpServer::create(end_point!(0.0.0.0:8080), 1);
+    let mut http_server = HttpServer::create(end_point!(0.0.0.0:8080), 10);
 
     http_server
         .route::<GET>("/")
