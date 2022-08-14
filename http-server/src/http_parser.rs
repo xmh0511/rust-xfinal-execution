@@ -726,7 +726,7 @@ fn read_multiple_form_body(
                 // 找boundary
 
                 let r = contains_substr(stream, &mut need_size, &mut buffs, boundary_sequence, 0); // 确保找到boundary_sequence
-                println!("invocation 846");
+                //println!("invocation 846");
 
                 if r.find_pos != -1 {
                     let mut subsequent = Vec::new();
@@ -746,7 +746,7 @@ fn read_multiple_form_body(
                     //println!("start pos:{start}, len:{}",buffs.len());
                     //println!("{:?}",&buffs[start..]);
                     let is_end = find_substr(&buffs, &end_boundary_sequence, 0);
-                    println!("need size: {}", need_size);
+                   // println!("need size: {}", need_size);
                     if is_end.find_pos == r.find_pos {
                         break 'Outer;
                     }
@@ -760,7 +760,7 @@ fn read_multiple_form_body(
             }
             1 => {
                 // Content-disposition:...\r\n
-                println!("state 1");
+                //println!("state 1");
                 let mut r = FindSet {
                     find_pos: -1,
                     end_pos: 0,
@@ -790,7 +790,7 @@ fn read_multiple_form_body(
                     //println!("{:?}",content_disposition);
                     //println!("{}", is_file(content_disposition));
                     if !is_file(content_disposition) {
-                        println!("是文本内容");
+                        //println!("是文本内容");
                         // 是文本内容
                         //let s = std::str::from_utf8(content_disposition).unwrap();
                         //let config = get_config_from_disposition(s, false);
@@ -840,7 +840,7 @@ fn read_multiple_form_body(
 
                             let mut subsequent = Vec::new();
                             subsequent.extend_from_slice(&buffs[start..]);
-                            println!("951 {:?}", &buffs[start..]);
+                            //println!("951 {:?}", &buffs[start..]);
                             buffs = subsequent;
                             state = 0;
                             continue 'Outer;
@@ -900,15 +900,11 @@ fn read_multiple_form_body(
                             buffs = subsequent;
 
                             //println!("移除content-type 1013: {:?}",&buffs);
-                            println!(
-                                "file content size {}",
-                                r = buffs.len() + need_size - boundary_sequence.len() - 6
-                            );
+                            // println!(
+                            //     "file content size {}",
+                            //     r = buffs.len() + need_size - boundary_sequence.len() - 6
+                            // );
 
-                            let mut file_end = FindSet {
-                                find_pos: -1,
-                                end_pos: 0,
-                            };
 
                             let mut file_handle = OpenOptions::new()
                                 .write(true)
@@ -920,7 +916,7 @@ fn read_multiple_form_body(
                                 find_pos: -1,
                                 end_pos: 0,
                             };
-                            let mut begin_find = 0;
+
                             let mut file_buff = [b'\0'; 1024];
                             loop {
                                 find_cr = find_substr(&buffs, b"\r", 0);
@@ -958,10 +954,10 @@ fn read_multiple_form_body(
                                                     continue;
                                                 }
                                             }else{
-                                                let need = crlf_boundary_sequence.len() - compare_len;
+                                                // let need = crlf_boundary_sequence.len() - compare_len;
                                                 let mut need_buff = vec![b'\0';1024];
-                                                println!("1099: {:?}",&buffs[pos..]);
-                                                println!("need size:{}",need_size);
+                                                //println!("1099: {:?}",&buffs[pos..]);
+                                                //println!("need size:{}",need_size);
                                                 match stream.read(&mut need_buff) {
                                                     Ok(size) => {
                                                         need_size -= size;
@@ -1025,6 +1021,6 @@ fn read_multiple_form_body(
             Err(_) => todo!(),
         }
     }
-    println!("1080");
+    //println!("1080");
     println!("{}", std::str::from_utf8(&text_only_sequence).unwrap());
 }
