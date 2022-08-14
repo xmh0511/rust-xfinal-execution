@@ -560,7 +560,7 @@ fn find_substr<'a>(slice: &'a [u8], sub: &'a [u8], start: usize) -> FindSet {
 }
 
 fn is_file(slice: &[u8]) -> bool {
-    let key = "filename".as_bytes();
+    let key = "filename=\"".as_bytes();
     match slice.windows(key.len()).position(|x| x == key) {
         Some(_) => true,
         None => false,
@@ -569,13 +569,30 @@ fn is_file(slice: &[u8]) -> bool {
 
 fn parse_file_content_type(slice: &[u8]) -> (&str, &str) {
     //println!("571 {}",std::str::from_utf8(slice).unwrap());
-    let s = std::str::from_utf8(slice).unwrap_or_else(|x| "");
+    let end = slice.len() - 4;
+    let s = std::str::from_utf8(&slice[..end]).unwrap_or_else(|x| "");
     //println!("572 {s}");
     match s.split_once(":") {
         Some((k, v)) => {
             return (k, v);
         }
         None => return ("", ""),
+    }
+}
+
+fn find_out_cr(slice: &[u8]) -> i64 {
+    for (i, e) in slice.iter().enumerate() {
+        if *e == b'\r' {
+            return i as i64;
+        }
+    }
+    return -1;
+}
+
+fn get_file_extension(s: &str) -> &str {
+    match s.rfind(".") {
+        Some(x) => &s[x..],
+        None => "",
     }
 }
 
@@ -605,7 +622,7 @@ fn consume_to_file(
             }
             //let mut eof = false;
             let mut buff = [b'\0'; 1024];
-            let mut precede_buff:Vec<u8> = Vec::new();
+            let mut precede_buff: Vec<u8> = Vec::new();
             loop {
                 match stream.read(&mut buff) {
                     Ok(read_size) => {
@@ -615,39 +632,34 @@ fn consume_to_file(
                         // }
                         let read_out_data = &buff[..read_size];
                         *need_size -= read_size;
-                        
+
                         //let data_end_pos = read_size;
 
-                        if precede_buff.len() !=0{
+                        if precede_buff.len() != 0 {
                             let copy_back = precede_buff.clone();
                             precede_buff.extend_from_slice(read_out_data);
                             let r = find_substr(&precede_buff, crlf_boundary, 0);
-                            if r.find_pos != -1{
+                            if r.find_pos != -1 {
+                                let find_pos = r.find_pos as usize;
+                                let _ = file.write(&precede_buff[0..find_pos]).unwrap();
                                 let mut may_end = Vec::new();
-                                may_end.extend_from_slice(&precede_buff[2..]);
+                                may_end.extend_from_slice(&precede_buff[find_pos..]);
                                 //eof = true;
                                 return Some(may_end);
-                            }else{
-                                let _ = file.write(&copy_back);
+                            } else {
+                                let _ = file.write(&copy_back).unwrap();
                                 precede_buff.clear();
                             }
                         }
 
-                        let cr_key_pos: i64 = {
-                            match read_out_data
-                                .windows(cr_key.len())
-                                .position(|key| key == cr_key)
-                            {
-                                Some(pos) => pos as i64,
-                                None => -1,
-                            }
-                        };
+                        let cr_key_pos = find_out_cr(read_out_data);
+
                         if cr_key_pos != -1 {
                             let cr_key_pos = cr_key_pos as usize;
                             let can_compare_len = read_size - cr_key_pos;
                             if can_compare_len < crlf_boundary_len {
-                                let _ = file.write(&buff[0..cr_key_pos]).unwrap();
-
+                                let _ = file.write(&read_out_data[..cr_key_pos]).unwrap();
+                                precede_buff.clear();
                                 precede_buff.extend_from_slice(&read_out_data[cr_key_pos..]);
 
                                 continue;
@@ -658,8 +670,13 @@ fn consume_to_file(
                                     .position(|binary| crlf_boundary == binary)
                                 {
                                     Some(pos) => {
-                                        //println!("\\r\\n");
-                                        let _ = file.write(&read_out_data[..pos]);
+                                        println!(
+                                            "end: {:?}, pos:{}, left size:{}",
+                                            &read_out_data[pos + 2..],
+                                            pos,
+                                            *need_size
+                                        );
+                                        //let _ = file.write(&read_out_data[..pos]);
 
                                         let mut may_end = Vec::new();
                                         may_end.extend_from_slice(&read_out_data[pos + 2..]);
@@ -717,7 +734,7 @@ fn consume_to_file_help(
     }
 }
 
-fn get_file_config(s: &str) -> (String, String) {
+fn get_config_from_disposition(s: &str, is_file: bool) -> (String, Option<String>) {
     //println!("file disposition: {}", s);
     let name = "name=\"";
     let r = match s.find(name) {
@@ -731,296 +748,416 @@ fn get_file_config(s: &str) -> (String, String) {
         }
         None => todo!(),
     };
-    let file_name_key = "filename=\"";
-    let bias = r.1 + 2;
-    let filename = match s[bias..].find(file_name_key) {
-        Some(pos) => {
-            let pos = bias + pos + file_name_key.len();
-            let end = "\"";
-            match s[pos..].find(end) {
-                Some(end) => String::from(&s[pos..pos + end]),
-                None => todo!(),
+    if is_file {
+        let file_name_key = "filename=\"";
+        let bias = r.1 + 2;
+        let filename = match s[bias..].find(file_name_key) {
+            Some(pos) => {
+                let pos = bias + pos + file_name_key.len();
+                let end = "\"";
+                match s[pos..].find(end) {
+                    Some(end) => String::from(&s[pos..pos + end]),
+                    None => todo!(),
+                }
             }
-        }
-        None => todo!(),
-    };
-    (r.0, filename)
+            None => todo!(),
+        };
+        return (r.0, Some(filename));
+    }
+    return (r.0, None);
 }
 
-fn separate_text_and_file<'a>(
+fn contains_substr(
     stream: &mut TcpStream,
-    container: &'a mut Vec<u8>,
-    (boundary, end): (&String, &String),
     need_size: &mut usize,
-    state: usize,
-    beg: usize,
-) -> SperateState {
-    let crlf = "\r\n".as_bytes();
-    let boundary_may_end = boundary.as_bytes();
-    let boundary_divider = format!("{boundary}\r\n");
-    let boundary_divider_binary = boundary_divider.as_bytes();
-    let boundary_end = end.as_bytes();
-    //println!("state:{state}");
-    match state {
-        0 => {
-            let rb = find_substr(&container, boundary_divider_binary, beg);
-            //println!("invoke 586: {}",beg);
-            //println!("{}",std::str::from_utf8(&container[beg..]).unwrap());
-            if rb.find_pos != -1 {
-                // found "--boundary\r\n"
+    body_slice: &mut Vec<u8>,
+    pat: &[u8],
+    start: usize,
+) -> FindSet {
+    let slice_len = body_slice.len();
+    let pat_len = pat.len();
 
-                return SperateState {
-                    eof: false,
-                    text_only: None,
-                    find_start: rb.end_pos,
-                    state: 1,
-                };
-            } else {
-                let eof_boundary = find_substr(&container, boundary_end, beg);
-                return SperateState {
-                    eof: eof_boundary.find_pos != -1,
-                    text_only: None,
-                    find_start: 0,
-                    state: 0,
+    let find = find_substr(body_slice, &pat[..1], start); // abcde 先测试a的位置
+    if find.find_pos != -1 {
+        let pos = find.find_pos as usize;
+
+        let sub_str_len = slice_len - pos;
+
+        if sub_str_len >= pat_len {
+            let sub_slice = &body_slice[pos..pos + pat_len]; //获取找到位置，到pat的长度的slice
+            if sub_slice == pat {
+                //body_slice中有pat的子序列
+                return FindSet {
+                    find_pos: pos as i64,
+                    end_pos: pos + pat_len,
                 };
             }
-        }
-        1 => {
-            let rc = find_substr(&container, crlf, beg); // for "Content-disposition:...\r\n"
-            if rc.find_pos != -1 {
-                //let start = rc.find_pos as usize;
-                let diposition_slice = &container[beg..rc.end_pos];
-                let diposition_str = match std::str::from_utf8(diposition_slice) {
-                    Ok(s) => s,
-                    Err(_) => {
-                        panic!("diposition is not a valid utf8 string")
-                    }
-                };
-                //println!("disposition: {}", diposition_str);
-                if !is_file(diposition_slice) {
-                    // text
-                    let data_part_end = find_substr(&container, boundary_may_end, rc.end_pos);
-                    if data_part_end.find_pos != -1 {
-                        // found the end boundary of the data part
+            return FindSet {
+                find_pos: -1,
+                end_pos: 0,
+            };
+        } else {
+            // 长度不够用来比较， 再读取需要的字节拼接起来进行比较
+            let need = pat_len - sub_str_len;
+            let may_sub_slice = &body_slice[pos..];
 
-                        let end = data_part_end.find_pos as usize;
-                        let start = beg - boundary_divider_binary.len();
-                        //println!("{start}-{end}");
-                        let mut s: Vec<u8> = Vec::new();
-                        s.extend_from_slice(&container[start..end]);
+            let mut buff = vec![b'\0'; need];
 
-                        return SperateState {
-                            eof: false,
-                            text_only: Some(s),
-                            find_start: data_part_end.find_pos as usize,
-                            state: 0,
+            match stream.read_exact(&mut buff) {
+                Ok(_) => {
+                    *need_size -= need;
+                    let mut complete = Vec::new();
+                    complete.extend_from_slice(may_sub_slice);
+                    complete.extend_from_slice(&buff);
+                    body_slice.extend_from_slice(&buff);
+                    if &complete == pat {
+                        //读取可以比较的数据后，比较结果包含pat
+                        return FindSet {
+                            find_pos: pos as i64,
+                            end_pos: pos + pat_len,
                         };
                     } else {
-                        // not found the end boundary of the data part
-                        return SperateState {
-                            eof: false,
-                            text_only: None,
-                            find_start: beg,
-                            state: 1,
+                        return FindSet {
+                            find_pos: -1,
+                            end_pos: 0,
                         };
                     }
-                } else {
-                    // file
-                    // from rc.end_pos   Content-disposition:...\r\n <- this point
-                    println!("is file");
-                    let dcrlf = "\r\n\r\n".as_bytes();
-                    let file_content_type = find_substr(&container, dcrlf, rc.end_pos);
-                    if file_content_type.find_pos != -1 {
-                        // found Content-type:...\r\n\r\n
-                        let start = file_content_type.find_pos as usize;
-                        let end = file_content_type.end_pos;
-                        //println!("{start}-{end}, value:{:?}",&container[rc.end_pos..start]);
-                        let r = parse_file_content_type(&container[rc.end_pos..start]);
-                        let file_config = get_file_config(diposition_str);
-                        if file_config.1 == "" || file_config.0 == "" || r.1 == "" {
-                            // invalid file upload request
-                            unimplemented!("invalid file upload request")
-                        }
-                        let file_extension = match file_config.1.rfind(".") {
-                            Some(pos) => &file_config.1[pos..],
-                            None => "",
-                        };
-
-                        let file = MultipleFormFile {
-                            filename: file_config.1.clone(),
-                            filepath: format!(
-                                "./upload/{}{}",
-                                uuid::Uuid::new_v4().to_string(),
-                                file_extension
-                            ),
-                            content_type: String::from(r.1.trim()),
-                            form_indice: file_config.0,
-                        };
-                        println!(
-                            "file config {:?}\n------------------------------------",
-                            file
-                        );
-                        let container_len = container.len();
-                        if container_len > file_content_type.end_pos {
-                            let try_end_boundary = find_substr(&container, boundary_may_end, end);
-                            if try_end_boundary.find_pos != -1 {
-                                // has all file content
-
-                                let file_end = try_end_boundary.find_pos as usize;
-                                let file = OpenOptions::new()
-                                    .write(true)
-                                    .create(true)
-                                    .open(file.filepath.clone());
-                                match file {
-                                    Ok(mut file) => {
-                                        let _ = file.write(&container[end..file_end - 2]);
-                                        // \r\n--Boundary
-                                    }
-                                    Err(_) => {}
-                                }
-                                return SperateState {
-                                    eof: false,
-                                    text_only: None,
-                                    find_start: file_end,
-                                    state: 0,
-                                };
-                            } else {
-                                // --Boundary\r\nContent-disposition:..\r\nContent-type:...\r\n\r\n...
-                                println!("partial data");
-
-                                // if file.form_indice == "file3"{
-                                //     println!("partial data is : {:?}",&container[end..container_len]);
-                                // }
-                                let mut partial = Vec::new();
-                                partial.extend_from_slice(&container[end..container_len]);
-                                return consume_to_file_help(
-                                    stream,
-                                    need_size,
-                                    file.filepath.clone(),
-                                    Some(&partial),
-                                    boundary_may_end,
-                                    container,
-                                );
-                                // println!("consume_to_file complete");
-                                //println!("container-length:{}, next start{}",container.len(),container_len - 1);
-                                // return SperateState {
-                                //     eof: false,
-                                //     text_only: None,
-                                //     find_start: container_len - 1,
-                                //     state: 0,
-                                // };
-                            }
-                        } else {
-                            //exactly need to read file data
-                            //println!("exactly need to read file data");
-                            return consume_to_file_help(
-                                stream,
-                                need_size,
-                                file.filepath.clone(),
-                                None,
-                                boundary_may_end,
-                                container,
-                            );
-                        }
-                    } else {
-                        // not found found Content-type:...\r\n\r\n
-                        return SperateState {
-                            eof: false,
-                            text_only: None,
-                            find_start: beg,
-                            state: 1,
-                        };
-                    }
-                    //todo!()
                 }
-            } else {
-                // not yet get the data part
-                return SperateState {
-                    eof: false,
-                    text_only: None,
-                    find_start: beg,
-                    state: 1,
-                };
+                Err(_) => todo!(),
             }
-        }
-        _ => {
-            todo!()
         }
     }
+    return FindSet {
+        find_pos: -1,
+        end_pos: 0,
+    };
 }
 
 fn read_multiple_form_body(
     stream: &mut TcpStream,
-    container: &mut Vec<u8>,
+    body: &mut Vec<u8>,
     (boundary, end): (&String, &String),
     mut need_size: usize,
 ) {
-    //println!("need_size {need_size}");
-    let mut start = 0 as usize;
-    let mut state = 0 as usize;
-    let mut eof = false;
-    let mut only_text: Vec<u8> = Vec::new();
-    if need_size != 0 {
-        //println!("before size:{}",container.len());
-        let mut buff: [u8; 1024] = [b'\0'; 1024];
-        while eof == false {
-            if need_size != 0 {
-                match stream.read(&mut buff) {
-                    Ok(read_size) => {
-                        //println!("continue read:{read_size}");
-                        container.extend_from_slice(&buff[..read_size]);
-                        need_size -= read_size;
+    let mut state = 0;
+    let mut buffs = Vec::new();
+    buffs.extend_from_slice(body);
+    let crlf_sequence = b"\r\n";
+    let boundary_sequence = boundary.as_bytes();
+    let mut text_only_sequence = Vec::new();
+    let mut end_boundary_sequence = Vec::new();
+    end_boundary_sequence.extend_from_slice(end.as_bytes());
+    //end_boundary_sequence.extend_from_slice(b"\r\n");
+
+    let end_boundary_sequence = end_boundary_sequence;
+
+    let mut crlf_boundary_sequence = Vec::new();
+    crlf_boundary_sequence.push(b'\r');
+    crlf_boundary_sequence.push(b'\n');
+    crlf_boundary_sequence.extend_from_slice(boundary_sequence);
+    let crlf_boundary_sequence = crlf_boundary_sequence;
+    'Outer: loop {
+        match state {
+            0 => {
+                // 找boundary
+
+                let r = contains_substr(stream, &mut need_size, &mut buffs, boundary_sequence, 0); // 确保找到boundary_sequence
+                println!("invocation 846");
+
+                if r.find_pos != -1 {
+                    let mut subsequent = Vec::new();
+                    let start = r.end_pos as usize + 2; //跳过\r\n
+                    if start > buffs.len() {
+                        let mut buff_two = [b'\0'; 2];
+                        match stream.read_exact(&mut buff_two) {
+                            Ok(_) => {
+                                need_size -= 2;
+                                buffs.extend_from_slice(&buff_two);
+                            }
+                            Err(_) => {
+                                todo!()
+                            }
+                        }
                     }
-                    Err(_) => {}
+                    //println!("start pos:{start}, len:{}",buffs.len());
+                    //println!("{:?}",&buffs[start..]);
+                    let is_end = find_substr(&buffs, &end_boundary_sequence, 0);
+                    println!("need size: {}", need_size);
+                    if is_end.find_pos == r.find_pos {
+                        break 'Outer;
+                    }
+                    subsequent.extend_from_slice(&buffs[start..]);
+                    buffs = subsequent;
+                    state = 1;
+                    continue 'Outer;
+                } else {
+                    panic!("bad body")
                 }
             }
-            //println!("after size:{}", container.len());
-            //println!("{}",std::str::from_utf8(&container).unwrap());
-            //println!("is eof: {:?}", eof);
-            let r = separate_text_and_file(
-                stream,
-                container,
-                (boundary, end),
-                &mut need_size,
-                state,
-                start,
-            );
-            //println!("-------------697");
-            start = r.find_start;
-            state = r.state;
-            eof = r.eof;
-            match r.text_only {
-                Some(x) => {
-                    // println!("{}", std::str::from_utf8(&x).unwrap());
-                    only_text.extend_from_slice(&x);
+            1 => {
+                // Content-disposition:...\r\n
+                println!("state 1");
+                let mut r = FindSet {
+                    find_pos: -1,
+                    end_pos: 0,
+                };
+                while r.find_pos == -1 {
+                    r = contains_substr(stream, &mut need_size, &mut buffs, crlf_sequence, 0); // 通过找\r\n
+                    if r.find_pos == -1 {
+                        let mut buff = [b'\0'; 256];
+                        match stream.read(&mut buff) {
+                            Ok(size) => {
+                                buffs.extend_from_slice(&buff[..size]);
+                                need_size -= size;
+                            }
+                            Err(_) => {
+                                todo!()
+                            }
+                        };
+                    }
+                    //println!("876 {:?}", r);
                 }
-                None => {}
-            }
-            //println!("------------------------------");
-        }
-    } else {
-        // everything has been read out
-        //println!("all complete");
-        while eof == false {
-            let r = separate_text_and_file(
-                stream,
-                container,
-                (boundary, end),
-                &mut need_size,
-                state,
-                start,
-            );
-            start = r.find_start;
-            state = r.state;
-            eof = r.eof;
-            match r.text_only {
-                Some(x) => {
-                    //println!("{:?}\n------------------------",&x);
-                    only_text.extend_from_slice(&x);
+                //println!("invocation 874,{:?}", r);
+                if r.find_pos != -1 {
+                    //println!("invocation 886");
+                    //let content_disposition_start = r.find_pos as usize;
+                    let content_disposition_end = r.end_pos;
+                    let content_disposition = &buffs[..content_disposition_end];
+                    //println!("{:?}",content_disposition);
+                    //println!("{}", is_file(content_disposition));
+                    if !is_file(content_disposition) {
+                        println!("是文本内容");
+                        // 是文本内容
+                        //let s = std::str::from_utf8(content_disposition).unwrap();
+                        //let config = get_config_from_disposition(s, false);
+                        let mut subsequent = Vec::new();
+                        text_only_sequence.extend_from_slice(boundary_sequence);
+                        text_only_sequence.extend_from_slice(b"\r\n");
+                        text_only_sequence.extend_from_slice(content_disposition);
+
+                        subsequent.extend_from_slice(&buffs[content_disposition_end..]); // 移除content_disposition的内容
+                        buffs = subsequent;
+
+                        //println!("{:?}", buffs);
+
+                        let mut find_boundary = FindSet {
+                            find_pos: -1,
+                            end_pos: 0,
+                        };
+
+                        while find_boundary.find_pos == -1 {
+                            find_boundary = contains_substr(
+                                stream,
+                                &mut need_size,
+                                &mut buffs,
+                                boundary_sequence,
+                                0,
+                            );
+                            if find_boundary.find_pos == -1 {
+                                let mut buff = [b'\0'; 256];
+                                match stream.read(&mut buff) {
+                                    Ok(size) => {
+                                        buffs.extend_from_slice(&buff[..size]);
+                                        need_size -= size;
+                                    }
+                                    Err(_) => {
+                                        todo!()
+                                    }
+                                };
+                            }
+                        }
+                        if find_boundary.find_pos != -1 {
+                            //println!("916 invocation");
+                            let start = find_boundary.find_pos as usize;
+                            let text_slice = &buffs[..start];
+                            text_only_sequence.extend_from_slice(text_slice);
+
+                            //println!("{}", std::str::from_utf8(&text_only_sequence).unwrap());
+
+                            let mut subsequent = Vec::new();
+                            subsequent.extend_from_slice(&buffs[start..]);
+                            println!("951 {:?}", &buffs[start..]);
+                            buffs = subsequent;
+                            state = 0;
+                            continue 'Outer;
+                        }
+                    } else {
+                        //文件
+                        let s = std::str::from_utf8(content_disposition).unwrap();
+                        let config = get_config_from_disposition(s, true);
+                        let filename = config.1.unwrap();
+                        let uid = uuid::Uuid::new_v4().to_string();
+                        let extension = get_file_extension(&filename);
+                        let filepath = format!("./upload/{}{}", uid, extension);
+                        let mut file = MultipleFormFile {
+                            filename: filename,
+                            filepath: filepath,
+                            content_type: String::new(),
+                            form_indice: config.0,
+                        };
+                        // println!("body 973: {:?}",&buffs);
+                        let mut subsequent = Vec::new();
+                        subsequent.extend_from_slice(&buffs[content_disposition_end..]); // 移除content_disposition的内容
+                        buffs = subsequent;
+                        let double_crlf = b"\r\n\r\n";
+
+                        //println!("body 979: {:?}",&buffs);
+
+                        let mut find_double_crlf = FindSet {
+                            find_pos: -1,
+                            end_pos: 0,
+                        };
+                        while find_double_crlf.find_pos == -1 {
+                            find_double_crlf =
+                                contains_substr(stream, &mut need_size, &mut buffs, double_crlf, 0);
+                            if find_double_crlf.find_pos == -1 {
+                                let mut buff = [b'\0'; 256];
+                                match stream.read(&mut buff) {
+                                    Ok(size) => {
+                                        buffs.extend_from_slice(&buff[..size]);
+                                        need_size -= size;
+                                    }
+                                    Err(_) => {
+                                        todo!()
+                                    }
+                                };
+                            }
+                        }
+                        //println!("body 1001: {:?}",&buffs);
+                        // println!("file content, {:?}",file);
+                        // panic!();
+                        if find_double_crlf.find_pos != -1 {
+                            // Content-type:...\r\n\r\n
+                            let content_type = &buffs[..find_double_crlf.end_pos];
+                            let result = parse_file_content_type(&content_type);
+                            file.content_type = result.1.to_string();
+                            let mut subsequent = Vec::new();
+                            subsequent.extend_from_slice(&buffs[find_double_crlf.end_pos..]); // 移除content-type:...\r\n\r\n
+                            buffs = subsequent;
+
+                            //println!("移除content-type 1013: {:?}",&buffs);
+                            println!(
+                                "file content size {}",
+                                r = buffs.len() + need_size - boundary_sequence.len() - 6
+                            );
+
+                            let mut file_end = FindSet {
+                                find_pos: -1,
+                                end_pos: 0,
+                            };
+
+                            let mut file_handle = OpenOptions::new()
+                                .write(true)
+                                .create(true)
+                                .open(file.filepath)
+                                .unwrap();
+
+                            let mut find_cr = FindSet {
+                                find_pos: -1,
+                                end_pos: 0,
+                            };
+                            let mut begin_find = 0;
+                            let mut file_buff = [b'\0'; 1024];
+                            loop {
+                                find_cr = find_substr(&buffs, b"\r", 0);
+                                if find_cr.find_pos == -1 {
+                                    file_handle.write(&buffs).unwrap();
+                                    match stream.read(&mut file_buff) {
+                                        Ok(size) => {
+                                            need_size -= size;
+                                            buffs.clear();
+                                            buffs.extend_from_slice(&file_buff[..size]);
+                                        }
+                                        Err(_) => todo!(),
+                                    }
+                                } else {
+                                    let pos = find_cr.find_pos as usize;
+                                    let len = buffs.len();
+                                    if pos +1 < len{
+                                        let u = buffs[pos+1];
+                                        if u == b'\n'{
+                                            let compare_len = len - pos;
+                                            if compare_len >= crlf_boundary_sequence.len(){
+                                                let find_test = find_substr(&buffs, &crlf_boundary_sequence, pos);
+                                                if find_test.find_pos !=-1{
+                                                    file_handle.write(&buffs[0..pos]).unwrap();
+                                                    state = 0;
+                                                    let mut temp = Vec::new();
+                                                    temp.extend_from_slice(&buffs[pos..]);
+                                                    buffs = temp;
+                                                    continue 'Outer;
+                                                }else{
+                                                    file_handle.write(&buffs[0..=pos+1]).unwrap();
+                                                    let mut temp = Vec::new();
+                                                    temp.extend_from_slice(&buffs[pos+2..]);
+                                                    buffs = temp;
+                                                    continue;
+                                                }
+                                            }else{
+                                                let need = crlf_boundary_sequence.len() - compare_len;
+                                                let mut need_buff = vec![b'\0';need];
+                                                match stream.read_exact(&mut need_buff) {
+                                                    Ok(_) => {
+                                                        need_size -= need;
+                                                        buffs.extend_from_slice(&file_buff);
+                                                        let r = find_substr(&buffs, &crlf_boundary_sequence, pos);
+                                                        if r.find_pos!=-1{
+                                                            let pos = r.find_pos as usize;
+                                                            file_handle.write(&buffs[0..pos]).unwrap();
+                                                            state = 0;
+                                                            let mut temp = Vec::new();
+                                                            temp.extend_from_slice(&buffs[pos..]);
+                                                            buffs = temp;
+                                                            continue 'Outer;
+                                                        }else{
+                                                            file_handle.write(&buffs[0..=pos+1]).unwrap();
+                                                            let mut temp = Vec::new();
+                                                            temp.extend_from_slice(&buffs[pos+2..]);
+                                                            buffs = temp;
+                                                            continue 'Outer;
+                                                        }
+                                                    }
+                                                    Err(_) => todo!(),
+                                                }
+                                            }
+                                        }else{
+                                            file_handle.write(&buffs[0..=pos]).unwrap();
+                                            let mut temp = Vec::new();
+                                            temp.extend_from_slice(&buffs[pos+1..]);
+                                            buffs = temp;
+                                            continue;
+                                        }
+                                    }else{
+                                        file_handle.write(&buffs[0..pos]).unwrap();
+                                        let mut temp_buff = [b'\0';1024];
+                                        match stream.read(& mut temp_buff) {
+                                            Ok(size) =>{
+                                                let mut temp = Vec::new();
+                                                temp.extend_from_slice(&buffs[pos..]);
+                                                need_size-=size;
+                                                temp.extend_from_slice(&temp_buff[..size]);
+                                                buffs = temp;
+                                                continue;
+                                            },
+                                            Err(_) => todo!(),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-                None => {}
             }
+            _ => {}
         }
     }
-    println!("{}", std::str::from_utf8(&only_text).unwrap());
+    if need_size != 0 {
+        let mut buff = [b'\0'; 10];
+        match stream.read(&mut buff) {
+            Ok(_) => {}
+            Err(_) => todo!(),
+        }
+    }
+    println!("1080");
+    println!("{}", std::str::from_utf8(&text_only_sequence).unwrap());
 }
