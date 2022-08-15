@@ -1,16 +1,19 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
-use std::io::{prelude::*, ErrorKind};
 use std::net::{Shutdown, TcpStream};
 use std::ops::DerefMut;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::{
+    io,
+    io::{prelude::*, ErrorKind},
+};
 
 use uuid;
 
 pub mod connection;
-pub use connection::{BodyContent, MultipleFormFile, Request, Response};
+pub use connection::{BodyContent, MultipleFormData, MultipleFormFile, Request, Response};
 
 pub trait Router {
     fn call(&self, req: &Request, res: &mut Response);
@@ -488,13 +491,20 @@ fn read_body_according_to_type<'a>(
                     println!("boundary: {}", boundary);
                     let end_boundary = format!("{}--", &boundary);
                     //println!("end boundary {}",end_boundary);
-                    read_multiple_form_body(
+                    let r = read_multiple_form_body(
                         stream,
                         container,
                         (&boundary, &end_boundary),
                         need_read_size,
                     );
-                    return BodyContent::Bad;
+                    match r {
+                        Ok(form) => {
+							return BodyContent::Multi(form);
+						},
+                        Err(_) => {
+							return BodyContent::Bad
+						},
+                    }
                 }
                 None => return BodyContent::Bad,
             },
@@ -574,7 +584,7 @@ fn parse_file_content_type(slice: &[u8]) -> (&str, &str) {
     //println!("572 {s}");
     match s.split_once(":") {
         Some((k, v)) => {
-            return (k, v);
+            return (k, v.trim());
         }
         None => return ("", ""),
     }
@@ -595,8 +605,6 @@ fn get_file_extension(s: &str) -> &str {
         None => "",
     }
 }
-
-
 
 fn get_config_from_disposition(s: &str, is_file: bool) -> (String, Option<String>) {
     //println!("file disposition: {}", s);
@@ -637,7 +645,7 @@ fn contains_substr(
     body_slice: &mut Vec<u8>,
     pat: &[u8],
     start: usize,
-) -> FindSet {
+) -> io::Result<FindSet> {
     let slice_len = body_slice.len();
     let pat_len = pat.len();
 
@@ -651,15 +659,15 @@ fn contains_substr(
             let sub_slice = &body_slice[pos..pos + pat_len]; //获取找到位置，到pat的长度的slice
             if sub_slice == pat {
                 //body_slice中有pat的子序列
-                return FindSet {
+                return io::Result::Ok(FindSet {
                     find_pos: pos as i64,
                     end_pos: pos + pat_len,
-                };
+                });
             }
-            return FindSet {
+            return io::Result::Ok(FindSet {
                 find_pos: -1,
                 end_pos: 0,
-            };
+            });
         } else {
             // 长度不够用来比较， 再读取需要的字节拼接起来进行比较
             let need = pat_len - sub_str_len;
@@ -676,33 +684,33 @@ fn contains_substr(
                     body_slice.extend_from_slice(&buff);
                     if &complete == pat {
                         //读取可以比较的数据后，比较结果包含pat
-                        return FindSet {
+                        return io::Result::Ok(FindSet {
                             find_pos: pos as i64,
                             end_pos: pos + pat_len,
-                        };
+                        });
                     } else {
-                        return FindSet {
+                        return io::Result::Ok(FindSet {
                             find_pos: -1,
                             end_pos: 0,
-                        };
+                        });
                     }
                 }
-                Err(_) => todo!(),
+                Err(e) => return io::Result::Err(e),
             }
         }
     }
-    return FindSet {
+    return io::Result::Ok(FindSet {
         find_pos: -1,
         end_pos: 0,
-    };
+    });
 }
 
-fn read_multiple_form_body(
+fn read_multiple_form_body<'a>(
     stream: &mut TcpStream,
-    body: &mut Vec<u8>,
+    body: &'a mut Vec<u8>,
     (boundary, end): (&String, &String),
     mut need_size: usize,
-) {
+) -> io::Result<HashMap<String, MultipleFormData<'a>>> {
     let mut state = 0;
     let mut buffs = Vec::new();
     buffs.extend_from_slice(body);
@@ -720,13 +728,16 @@ fn read_multiple_form_body(
     crlf_boundary_sequence.push(b'\n');
     crlf_boundary_sequence.extend_from_slice(boundary_sequence);
     let crlf_boundary_sequence = crlf_boundary_sequence;
+
+    let mut multiple_data_collection: HashMap<String, MultipleFormData> = HashMap::new();
+
     'Outer: loop {
         match state {
             0 => {
                 // 找boundary
 
-                let r = contains_substr(stream, &mut need_size, &mut buffs, boundary_sequence, 0); // 确保找到boundary_sequence
-                //println!("invocation 846");
+                let r = contains_substr(stream, &mut need_size, &mut buffs, boundary_sequence, 0)?; // 确保找到boundary_sequence
+                                                                                                    //println!("invocation 846");
 
                 if r.find_pos != -1 {
                     let mut subsequent = Vec::new();
@@ -746,7 +757,7 @@ fn read_multiple_form_body(
                     //println!("start pos:{start}, len:{}",buffs.len());
                     //println!("{:?}",&buffs[start..]);
                     let is_end = find_substr(&buffs, &end_boundary_sequence, 0);
-                   // println!("need size: {}", need_size);
+                    // println!("need size: {}", need_size);
                     if is_end.find_pos == r.find_pos {
                         break 'Outer;
                     }
@@ -766,7 +777,7 @@ fn read_multiple_form_body(
                     end_pos: 0,
                 };
                 while r.find_pos == -1 {
-                    r = contains_substr(stream, &mut need_size, &mut buffs, crlf_sequence, 0); // 通过找\r\n
+                    r = contains_substr(stream, &mut need_size, &mut buffs, crlf_sequence, 0)?; // 通过找\r\n
                     if r.find_pos == -1 {
                         let mut buff = [b'\0'; 256];
                         match stream.read(&mut buff) {
@@ -816,7 +827,7 @@ fn read_multiple_form_body(
                                 &mut buffs,
                                 boundary_sequence,
                                 0,
-                            );
+                            )?;
                             if find_boundary.find_pos == -1 {
                                 let mut buff = [b'\0'; 256];
                                 match stream.read(&mut buff) {
@@ -872,8 +883,13 @@ fn read_multiple_form_body(
                             end_pos: 0,
                         };
                         while find_double_crlf.find_pos == -1 {
-                            find_double_crlf =
-                                contains_substr(stream, &mut need_size, &mut buffs, double_crlf, 0);
+                            find_double_crlf = contains_substr(
+                                stream,
+                                &mut need_size,
+                                &mut buffs,
+                                double_crlf,
+                                0,
+                            )?;
                             if find_double_crlf.find_pos == -1 {
                                 let mut buff = [b'\0'; 256];
                                 match stream.read(&mut buff) {
@@ -905,17 +921,16 @@ fn read_multiple_form_body(
                             //     r = buffs.len() + need_size - boundary_sequence.len() - 6
                             // );
 
-
                             let mut file_handle = OpenOptions::new()
                                 .write(true)
                                 .create(true)
-                                .open(file.filepath)
+                                .open(file.filepath.clone())
                                 .unwrap();
 
-                            let mut find_cr = FindSet {
-                                find_pos: -1,
-                                end_pos: 0,
-                            };
+                            multiple_data_collection
+                                .insert(file.form_indice.clone(), MultipleFormData::File(file));
+
+                            let mut find_cr;
 
                             let mut file_buff = [b'\0'; 1024];
                             loop {
@@ -933,48 +948,62 @@ fn read_multiple_form_body(
                                 } else {
                                     let pos = find_cr.find_pos as usize;
                                     let len = buffs.len();
-                                    if pos +1 < len{
-                                        let u = buffs[pos+1];
-                                        if u == b'\n'{
+                                    if pos + 1 < len {
+                                        let u = buffs[pos + 1];
+                                        if u == b'\n' {
                                             let compare_len = len - pos;
-                                            if compare_len >= crlf_boundary_sequence.len(){
-                                                let find_test = find_substr(&buffs, &crlf_boundary_sequence, pos);
-                                                if find_test.find_pos !=-1{
+                                            if compare_len >= crlf_boundary_sequence.len() {
+                                                let find_test = find_substr(
+                                                    &buffs,
+                                                    &crlf_boundary_sequence,
+                                                    pos,
+                                                );
+                                                if find_test.find_pos != -1 {
                                                     file_handle.write(&buffs[0..pos]).unwrap();
                                                     state = 0;
                                                     let mut temp = Vec::new();
                                                     temp.extend_from_slice(&buffs[pos..]);
                                                     buffs = temp;
                                                     continue 'Outer;
-                                                }else{
-                                                    file_handle.write(&buffs[0..=pos+1]).unwrap();
+                                                } else {
+                                                    file_handle.write(&buffs[0..=pos + 1]).unwrap();
                                                     let mut temp = Vec::new();
-                                                    temp.extend_from_slice(&buffs[pos+2..]);
+                                                    temp.extend_from_slice(&buffs[pos + 2..]);
                                                     buffs = temp;
                                                     continue;
                                                 }
-                                            }else{
+                                            } else {
                                                 // let need = crlf_boundary_sequence.len() - compare_len;
-                                                let mut need_buff = vec![b'\0';1024];
+                                                let mut need_buff = vec![b'\0'; 1024];
                                                 //println!("1099: {:?}",&buffs[pos..]);
                                                 //println!("need size:{}",need_size);
                                                 match stream.read(&mut need_buff) {
                                                     Ok(size) => {
                                                         need_size -= size;
                                                         buffs.extend_from_slice(&need_buff[..size]);
-                                                        let r = find_substr(&buffs, &crlf_boundary_sequence, pos);
-                                                        if r.find_pos!=-1{
+                                                        let r = find_substr(
+                                                            &buffs,
+                                                            &crlf_boundary_sequence,
+                                                            pos,
+                                                        );
+                                                        if r.find_pos != -1 {
                                                             let pos = r.find_pos as usize;
-                                                            file_handle.write(&buffs[0..pos]).unwrap();
+                                                            file_handle
+                                                                .write(&buffs[0..pos])
+                                                                .unwrap();
                                                             state = 0;
                                                             let mut temp = Vec::new();
                                                             temp.extend_from_slice(&buffs[pos..]);
                                                             buffs = temp;
                                                             continue 'Outer;
-                                                        }else{
-                                                            file_handle.write(&buffs[0..=pos+1]).unwrap();
+                                                        } else {
+                                                            file_handle
+                                                                .write(&buffs[0..=pos + 1])
+                                                                .unwrap();
                                                             let mut temp = Vec::new();
-                                                            temp.extend_from_slice(&buffs[pos+2..]);
+                                                            temp.extend_from_slice(
+                                                                &buffs[pos + 2..],
+                                                            );
                                                             buffs = temp;
                                                             continue;
                                                         }
@@ -982,25 +1011,25 @@ fn read_multiple_form_body(
                                                     Err(_) => todo!(),
                                                 }
                                             }
-                                        }else{
+                                        } else {
                                             file_handle.write(&buffs[0..=pos]).unwrap();
                                             let mut temp = Vec::new();
-                                            temp.extend_from_slice(&buffs[pos+1..]);
+                                            temp.extend_from_slice(&buffs[pos + 1..]);
                                             buffs = temp;
                                             continue;
                                         }
-                                    }else{
+                                    } else {
                                         file_handle.write(&buffs[0..pos]).unwrap();
-                                        let mut temp_buff = [b'\0';1024];
-                                        match stream.read(& mut temp_buff) {
-                                            Ok(size) =>{
+                                        let mut temp_buff = [b'\0'; 1024];
+                                        match stream.read(&mut temp_buff) {
+                                            Ok(size) => {
                                                 let mut temp = Vec::new();
                                                 temp.extend_from_slice(&buffs[pos..]);
-                                                need_size-=size;
+                                                need_size -= size;
                                                 temp.extend_from_slice(&temp_buff[..size]);
                                                 buffs = temp;
                                                 continue;
-                                            },
+                                            }
                                             Err(_) => todo!(),
                                         }
                                     }
@@ -1014,7 +1043,7 @@ fn read_multiple_form_body(
         }
     }
     if need_size != 0 {
-        println!("{:?}",buffs);
+        println!("{:?}", buffs);
         let mut buff = [b'\0'; 10];
         match stream.read(&mut buff) {
             Ok(_) => {}
@@ -1022,5 +1051,35 @@ fn read_multiple_form_body(
         }
     }
     //println!("1080");
-    println!("{}", std::str::from_utf8(&text_only_sequence).unwrap());
+    //println!("{}", std::str::from_utf8(&text_only_sequence).unwrap());
+    body.clear();
+    body.extend_from_slice(&text_only_sequence);
+    let mut pat = Vec::new();
+    pat.extend_from_slice(&boundary_sequence);
+    pat.extend_from_slice(b"\r\n");
+
+    match std::str::from_utf8(&pat) {
+        Ok(pat) => {
+            match std::str::from_utf8(body) {
+                Ok(s) => {
+                    for el in s.split(pat) {
+                        if el == "" {
+                            continue;
+                        }
+                        let r = el.split_once("\r\n\r\n");
+                        let r = r.unwrap();
+                        //println!("r== {:?}",r);
+                        let name = get_config_from_disposition(r.0, false);
+                        let text_len = r.1.len();
+                        multiple_data_collection
+                            .insert(name.0, MultipleFormData::Text(&r.1[0..text_len - 2]));
+                    }
+                    println!("{:#?}",multiple_data_collection);
+                    return io::Result::Ok(multiple_data_collection);
+                }
+                Err(_) => todo!(),
+            }
+        }
+        Err(_) => todo!(),
+    }
 }

@@ -207,6 +207,7 @@ impl<'a> Response<'a> {
 pub enum BodyContent<'a> {
     UrlForm(HashMap<&'a str, &'a str>),
     PureText(&'a str),
+	Multi(HashMap<String, MultipleFormData<'a>>),
     None,
     Bad,
 }
@@ -219,4 +220,10 @@ pub struct MultipleFormFile {
     pub form_indice:String
 }
 
-pub enum MultipleFormData {}
+#[derive(Debug)]
+pub enum MultipleFormData<'a> {
+	Text(&'a str),
+	File(MultipleFormFile)
+}
+
+
