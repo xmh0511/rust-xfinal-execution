@@ -124,7 +124,7 @@ impl HttpServer {
     fn not_found_default_if_not_set(&mut self) {
         let r = &self.router.get(&String::from("NEVER_FOUND_FOR_ALL"));
         if let None = *r {
-            self.set_not_found(|req: &Request, res: &mut Response| {
+            self.set_not_found(|_req: &Request, res: &mut Response| {
                 res.write_state(404);
             });
         }

@@ -1,4 +1,4 @@
-use std::{thread::panicking, str::FromStr};
+use std::{str::FromStr};
 
 use proc_macro::TokenStream;
 #[proc_macro]

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::net::{Shutdown, TcpStream};
-use std::ops::DerefMut;
+
 use std::rc::Rc;
 use std::sync::Arc;
 use std::{
@@ -538,12 +538,7 @@ fn parse_url_form_body(container: &mut Vec<u8>) -> BodyContent<'_> {
     }
 }
 
-struct SperateState {
-    text_only: Option<Vec<u8>>,
-    eof: bool,
-    find_start: usize,
-    state: usize,
-}
+
 #[derive(Debug)]
 struct FindSet {
     find_pos: i64,
@@ -580,7 +575,7 @@ fn is_file(slice: &[u8]) -> bool {
 fn parse_file_content_type(slice: &[u8]) -> (&str, &str) {
     //println!("571 {}",std::str::from_utf8(slice).unwrap());
     let end = slice.len() - 4;
-    let s = std::str::from_utf8(&slice[..end]).unwrap_or_else(|x| "");
+    let s = std::str::from_utf8(&slice[..end]).unwrap_or_else(|_| "");
     //println!("572 {s}");
     match s.split_once(":") {
         Some((k, v)) => {
@@ -590,14 +585,7 @@ fn parse_file_content_type(slice: &[u8]) -> (&str, &str) {
     }
 }
 
-fn find_out_cr(slice: &[u8]) -> i64 {
-    for (i, e) in slice.iter().enumerate() {
-        if *e == b'\r' {
-            return i as i64;
-        }
-    }
-    return -1;
-}
+
 
 fn get_file_extension(s: &str) -> &str {
     match s.rfind(".") {

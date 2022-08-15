@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::net::TcpStream;
-use std::ops::DerefMut;
+
 use std::rc::Rc;
 
 pub mod http_response_table {
@@ -28,7 +28,7 @@ pub mod http_response_table {
     ];
 
     pub(super) fn get_httpstatus_from_code(code: u16) -> &'static str {
-        match STATE_TABLE.binary_search_by_key(&code, |&(k, v)| k) {
+        match STATE_TABLE.binary_search_by_key(&code, |&(k, _)| k) {
             Ok(index) => STATE_TABLE[index].1,
             Err(_) => panic!("not supporting such a http state code"),
         }
@@ -55,7 +55,7 @@ pub mod http_response_table {
     pub const CONNECT: u8 = 7;
     pub const TRACE: u8 = 8;
     pub fn get_httpmethod_from_code(code: u8) -> &'static str {
-        match HTTP_METHODS.binary_search_by_key(&code, |&(k, v)| k) {
+        match HTTP_METHODS.binary_search_by_key(&code, |&(k, _)| k) {
             Ok(index) => HTTP_METHODS[index].1,
             Err(_) => panic!("not supporting such a http state code"),
         }
@@ -111,6 +111,53 @@ impl<'a> Request<'a> {
                     return None;
                 }
             }
+        } else if let BodyContent::Multi(x) = &self.body {
+            let r = x.keys().find(|&ik| {
+                if ik.to_lowercase() == k.to_lowercase() {
+                    true
+                } else {
+                    false
+                }
+            });
+            match r {
+                Some(s) => {
+                    let v = x.get(s).unwrap();
+                    match v {
+                        MultipleFormData::Text(v) => {
+                            return Some(*v);
+                        }
+                        MultipleFormData::File(_) => return None,
+                    }
+                }
+                None => {
+                    return None;
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn get_file(&self, k: &str) -> Option<&'_ MultipleFormFile> {
+        if let BodyContent::Multi(x) = &self.body {
+            let r = x.keys().find(|&ik| {
+                if k.to_lowercase() == ik.to_lowercase() {
+                    true
+                } else {
+                    false
+                }
+            });
+            match r {
+                Some(s) => {
+                    let item = x.get(s).unwrap();
+                    if let MultipleFormData::File(file) = item {
+                        return Some(file);
+                    } else {
+                        return None;
+                    }
+                }
+                None => return None,
+            }
         } else {
             None
         }
@@ -118,6 +165,41 @@ impl<'a> Request<'a> {
     pub fn get_queries(&self) -> Option<HashMap<&str, &str>> {
         if let BodyContent::UrlForm(x) = &self.body {
             Some(x.clone())
+        } else if let BodyContent::Multi(x) = &self.body {
+            let mut v = HashMap::new();
+            for (k, item) in x {
+                match item {
+                    MultipleFormData::Text(text) => {
+                        v.insert(k.as_str(), *text);
+                    }
+                    MultipleFormData::File(_) => {}
+                }
+            }
+            if v.len() != 0 {
+                return Some(v);
+            } else {
+                return None;
+            }
+        } else {
+            None
+        }
+    }
+    pub fn get_files(&self) -> Option<Vec<&MultipleFormFile>> {
+        if let BodyContent::Multi(x) = &self.body {
+            let mut vec = Vec::new();
+            for (_k, v) in x {
+                match v {
+                    MultipleFormData::Text(_) =>{},
+                    MultipleFormData::File(file) => {
+						vec.push(file);
+					},
+                }
+            }
+			if vec.len() !=0{
+				return Some(vec);
+			}else{
+				return None;
+			}
         } else {
             None
         }
@@ -207,23 +289,21 @@ impl<'a> Response<'a> {
 pub enum BodyContent<'a> {
     UrlForm(HashMap<&'a str, &'a str>),
     PureText(&'a str),
-	Multi(HashMap<String, MultipleFormData<'a>>),
+    Multi(HashMap<String, MultipleFormData<'a>>),
     None,
     Bad,
 }
 
 #[derive(Debug)]
 pub struct MultipleFormFile {
-	pub filename: String,
+    pub filename: String,
     pub filepath: String,
     pub content_type: String,
-    pub form_indice:String
+    pub form_indice: String,
 }
 
 #[derive(Debug)]
 pub enum MultipleFormData<'a> {
-	Text(&'a str),
-	File(MultipleFormFile)
+    Text(&'a str),
+    File(MultipleFormFile),
 }
-
-
