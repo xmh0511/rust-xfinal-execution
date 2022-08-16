@@ -499,11 +499,9 @@ fn read_body_according_to_type<'a>(
                     );
                     match r {
                         Ok(form) => {
-							return BodyContent::Multi(form);
-						},
-                        Err(_) => {
-							return BodyContent::Bad
-						},
+                            return BodyContent::Multi(form);
+                        }
+                        Err(_) => return BodyContent::Bad,
                     }
                 }
                 None => return BodyContent::Bad,
@@ -538,7 +536,6 @@ fn parse_url_form_body(container: &mut Vec<u8>) -> BodyContent<'_> {
     }
 }
 
-
 #[derive(Debug)]
 struct FindSet {
     find_pos: i64,
@@ -564,28 +561,28 @@ fn find_substr<'a>(slice: &'a [u8], sub: &'a [u8], start: usize) -> FindSet {
     }
 }
 
-fn find_substr_once(slice:&[u8], sub:&[u8],start:usize)-> FindSet{
-     let remainder = slice.len()  - start;
-	 if sub.len() > remainder{
-		FindSet{
-			find_pos: -1,
-			end_pos: 0,
-		}
-	 }else{
-		let end_pos = start + sub.len();
-		let compare_str = &slice[start..end_pos];
-		if compare_str == sub{
-			FindSet{
-				find_pos: start as i64,
-				end_pos: end_pos,
-			}
-		}else{
-			FindSet{
-				find_pos: -1,
-				end_pos: 0,
-			}
-		}
-	 }
+fn find_substr_once(slice: &[u8], sub: &[u8], start: usize) -> FindSet {
+    let remainder = slice.len() - start;
+    if sub.len() > remainder {
+        FindSet {
+            find_pos: -1,
+            end_pos: 0,
+        }
+    } else {
+        let end_pos = start + sub.len();
+        let compare_str = &slice[start..end_pos];
+        if compare_str == sub {
+            FindSet {
+                find_pos: start as i64,
+                end_pos: end_pos,
+            }
+        } else {
+            FindSet {
+                find_pos: -1,
+                end_pos: 0,
+            }
+        }
+    }
 }
 
 fn is_file(slice: &[u8]) -> bool {
@@ -608,8 +605,6 @@ fn parse_file_content_type(slice: &[u8]) -> (&str, &str) {
         None => return ("", ""),
     }
 }
-
-
 
 fn get_file_extension(s: &str) -> &str {
     match s.rfind(".") {
@@ -747,9 +742,8 @@ fn read_multiple_form_body<'a>(
         match state {
             0 => {
                 // 找boundary
-
+                // 当前状态，buffs的内容总是以--Boundary??开头
                 let r = contains_substr(stream, &mut need_size, &mut buffs, boundary_sequence, 0)?; // 确保找到boundary_sequence
-
 
                 if r.find_pos != -1 {
                     let mut subsequent = Vec::new();
@@ -761,16 +755,16 @@ fn read_multiple_form_body<'a>(
                                 need_size -= 2;
                                 buffs.extend_from_slice(&buff_two);
                             }
-                            Err(_) => {
-                                todo!()
+                            Err(e) => {
+                                return io::Result::Err(e);
                             }
                         }
                     }
 
-
                     let is_end = find_substr_once(&buffs, &end_boundary_sequence, 0);
 
                     if is_end.find_pos == r.find_pos {
+                        //确定是否是完全结束的分隔符，如果对--Boundary 和--Boundary--分别进行查找，如果他们起始位置一致，那么就是结尾符
                         break 'Outer;
                     }
                     subsequent.extend_from_slice(&buffs[start..]);
@@ -778,7 +772,8 @@ fn read_multiple_form_body<'a>(
                     state = 1;
                     continue 'Outer;
                 } else {
-                    panic!("bad body")
+                    let e = io::Error::new(io::ErrorKind::InvalidData, "bad body");
+                    return io::Result::Err(e);
                 }
             }
             1 => {
@@ -797,16 +792,14 @@ fn read_multiple_form_body<'a>(
                                 buffs.extend_from_slice(&buff[..size]);
                                 need_size -= size;
                             }
-                            Err(_) => {
-                                todo!()
+                            Err(e) => {
+                                return io::Result::Err(e);
                             }
                         };
                     }
-
                 }
 
                 if r.find_pos != -1 {
-
                     let content_disposition_end = r.end_pos;
                     let content_disposition = &buffs[..content_disposition_end];
 
@@ -821,7 +814,6 @@ fn read_multiple_form_body<'a>(
 
                         subsequent.extend_from_slice(&buffs[content_disposition_end..]); // 移除content_disposition的内容
                         buffs = subsequent;
-
 
                         let mut find_boundary = FindSet {
                             find_pos: -1,
@@ -843,18 +835,16 @@ fn read_multiple_form_body<'a>(
                                         buffs.extend_from_slice(&buff[..size]);
                                         need_size -= size;
                                     }
-                                    Err(_) => {
-                                        todo!()
+                                    Err(e) => {
+                                        return io::Result::Err(e);
                                     }
                                 };
                             }
                         }
                         if find_boundary.find_pos != -1 {
-
                             let start = find_boundary.find_pos as usize;
                             let text_slice = &buffs[..start];
                             text_only_sequence.extend_from_slice(text_slice);
-
 
                             let mut subsequent = Vec::new();
                             subsequent.extend_from_slice(&buffs[start..]);
@@ -883,7 +873,6 @@ fn read_multiple_form_body<'a>(
                         buffs = subsequent;
                         let double_crlf = b"\r\n\r\n";
 
-
                         let mut find_double_crlf = FindSet {
                             find_pos: -1,
                             end_pos: 0,
@@ -903,8 +892,8 @@ fn read_multiple_form_body<'a>(
                                         buffs.extend_from_slice(&buff[..size]);
                                         need_size -= size;
                                     }
-                                    Err(_) => {
-                                        todo!()
+                                    Err(e) => {
+                                        return io::Result::Err(e);
                                     }
                                 };
                             }
@@ -918,8 +907,6 @@ fn read_multiple_form_body<'a>(
                             let mut subsequent = Vec::new();
                             subsequent.extend_from_slice(&buffs[find_double_crlf.end_pos..]); // 移除content-type:...\r\n\r\n
                             buffs = subsequent;
-
-
 
                             let mut file_handle = OpenOptions::new()
                                 .write(true)
@@ -935,7 +922,9 @@ fn read_multiple_form_body<'a>(
                             let mut file_buff = [b'\0'; 1024];
                             loop {
                                 find_cr = find_substr(&buffs, b"\r", 0);
+                                //以\r为关键字判断是否是文件内容的一部分还是分隔符的一部分
                                 if find_cr.find_pos == -1 {
+                                    //如果整个字节串里没有\r, 那么一定都是文件内容
                                     file_handle.write(&buffs).unwrap();
                                     match stream.read(&mut file_buff) {
                                         Ok(size) => {
@@ -943,7 +932,7 @@ fn read_multiple_form_body<'a>(
                                             buffs.clear();
                                             buffs.extend_from_slice(&file_buff[..size]);
                                         }
-                                        Err(_) => todo!(),
+                                        Err(e) => return io::Result::Err(e),
                                     }
                                 } else {
                                     let pos = find_cr.find_pos as usize;
@@ -951,21 +940,25 @@ fn read_multiple_form_body<'a>(
                                     if pos + 1 < len {
                                         let u = buffs[pos + 1];
                                         if u == b'\n' {
+                                            //判断\r下一个字节是否是\n
                                             let compare_len = len - pos;
                                             if compare_len >= crlf_boundary_sequence.len() {
+                                                //剩余大小足够比较\r\n是否属于分隔符
                                                 let find_test = find_substr_once(
                                                     &buffs,
                                                     &crlf_boundary_sequence,
                                                     pos,
                                                 );
                                                 if find_test.find_pos != -1 {
+                                                    //如果\r\n是分隔符
                                                     file_handle.write(&buffs[0..pos]).unwrap();
                                                     state = 0;
                                                     let mut temp = Vec::new();
-                                                    temp.extend_from_slice(&buffs[pos+2..]); //找\r\n--Boundary, 跳过\r\n
+                                                    temp.extend_from_slice(&buffs[pos + 2..]); //找\r\n--Boundary, 跳过\r\n
                                                     buffs = temp;
                                                     continue 'Outer;
                                                 } else {
+                                                    //\r\n不是形成分隔符的关键字，那么他们就是文件内容的一部分
                                                     file_handle.write(&buffs[0..=pos + 1]).unwrap();
                                                     let mut temp = Vec::new();
                                                     temp.extend_from_slice(&buffs[pos + 2..]);
@@ -973,10 +966,12 @@ fn read_multiple_form_body<'a>(
                                                     continue;
                                                 }
                                             } else {
+                                                //如果关键字是\r\n, 但后续没有足够能够进行比较的字节
 
                                                 let mut need_buff = vec![b'\0'; 1024];
 
                                                 match stream.read(&mut need_buff) {
+                                                    //继续读一部分内容以进行拼凑比较
                                                     Ok(size) => {
                                                         need_size -= size;
                                                         buffs.extend_from_slice(&need_buff[..size]);
@@ -986,20 +981,25 @@ fn read_multiple_form_body<'a>(
                                                             pos,
                                                         );
                                                         if r.find_pos != -1 {
+                                                            //拼凑后\r\n形成了分隔符
                                                             let pos = r.find_pos as usize;
                                                             file_handle
                                                                 .write(&buffs[0..pos])
                                                                 .unwrap();
                                                             state = 0;
                                                             let mut temp = Vec::new();
-                                                            temp.extend_from_slice(&buffs[pos+2..]);//找\r\n--Boundary, 跳过\r\n
+                                                            temp.extend_from_slice(
+                                                                &buffs[pos + 2..],
+                                                            ); //找\r\n--Boundary, 跳过\r\n
                                                             buffs = temp;
                                                             continue 'Outer;
                                                         } else {
+                                                            //平凑后发现\r\n不是形成分隔符的关键字，那么\r\n就是文件内容的一部分
                                                             file_handle
                                                                 .write(&buffs[0..=pos + 1])
                                                                 .unwrap();
                                                             let mut temp = Vec::new();
+                                                            //\r\n是文件内容，所以从\n后面开始
                                                             temp.extend_from_slice(
                                                                 &buffs[pos + 2..],
                                                             );
@@ -1007,17 +1007,19 @@ fn read_multiple_form_body<'a>(
                                                             continue;
                                                         }
                                                     }
-                                                    Err(_) => todo!(),
+                                                    Err(e) => return io::Result::Err(e),
                                                 }
                                             }
                                         } else {
+                                            //\r的下一个字节不是\n, 那么可以肯定\r是文件的内容
                                             file_handle.write(&buffs[0..=pos]).unwrap();
                                             let mut temp = Vec::new();
-                                            temp.extend_from_slice(&buffs[pos + 1..]);
+                                            temp.extend_from_slice(&buffs[pos + 1..]); //从\r的下一个字节开始
                                             buffs = temp;
                                             continue;
                                         }
                                     } else {
+                                        // \r正好是buffs里面的最后一个字节，那么只能确定0~前一个字节是文件内容
                                         file_handle.write(&buffs[0..pos]).unwrap();
                                         let mut temp_buff = [b'\0'; 1024];
                                         match stream.read(&mut temp_buff) {
@@ -1029,7 +1031,7 @@ fn read_multiple_form_body<'a>(
                                                 buffs = temp;
                                                 continue;
                                             }
-                                            Err(_) => todo!(),
+                                            Err(e) => return io::Result::Err(e),
                                         }
                                     }
                                 }
@@ -1042,11 +1044,10 @@ fn read_multiple_form_body<'a>(
         }
     }
     if need_size != 0 {
-
-        let mut buff = [b'\0'; 10];  //充其量没有之前的循环中没有读 --end_boundary--?? ??两个字节
+        let mut buff = [b'\0'; 10]; //充其量没有之前的循环中没有读 --end_boundary--?? ??两个字节
         match stream.read(&mut buff) {
             Ok(_) => {}
-            Err(_) => todo!(),
+            Err(e) => return io::Result::Err(e),
         }
     }
 
@@ -1057,27 +1058,31 @@ fn read_multiple_form_body<'a>(
     pat.extend_from_slice(b"\r\n");
 
     match std::str::from_utf8(&pat) {
-        Ok(pat) => {
-            match std::str::from_utf8(body) {
-                Ok(s) => {
-                    for el in s.split(pat) {
-                        if el == "" {
-                            continue;
-                        }
-                        let r = el.split_once("\r\n\r\n");
-                        let r = r.unwrap();
-
-                        let name = get_config_from_disposition(r.0, false);
-                        let text_len = r.1.len();
-                        multiple_data_collection
-                            .insert(name.0, MultipleFormData::Text(&r.1[0..text_len - 2]));
+        Ok(pat) => match std::str::from_utf8(body) {
+            Ok(s) => {
+                for el in s.split(pat) {
+                    if el == "" {
+                        continue;
                     }
-                    println!("{:#?}",multiple_data_collection);
-                    return io::Result::Ok(multiple_data_collection);
+                    let r = el.split_once("\r\n\r\n");
+                    let r = r.unwrap();
+
+                    let name = get_config_from_disposition(r.0, false);
+                    let text_len = r.1.len();
+                    multiple_data_collection
+                        .insert(name.0, MultipleFormData::Text(&r.1[0..text_len - 2]));
                 }
-                Err(_) => todo!(),
+                println!("{:#?}", multiple_data_collection);
+                return io::Result::Ok(multiple_data_collection);
             }
+            Err(_) => {
+                let e = io::Error::new(io::ErrorKind::InvalidData, "bad body with invalid utf8");
+                return io::Result::Err(e);
+            }
+        },
+        Err(_) => {
+            let e = io::Error::new(io::ErrorKind::InvalidData, "bad body with invalid utf8");
+            return io::Result::Err(e);
         }
-        Err(_) => todo!(),
     }
 }
