@@ -67,13 +67,18 @@ impl HttpServer {
             thread_number: count,
             router: HashMap::new(),
 			config_:ServerConfig{
-				upload_directory:String::from("./upload")
+				upload_directory:String::from("./upload"),
+				read_timeout: 5*1000
 			}
         }
     }
 
 	fn create_directory(&self){
 		let _ = std::fs::create_dir(self.config_.upload_directory.clone());
+	}
+
+	pub fn set_read_timeout(& mut self, millis:u32){
+		self.config_.read_timeout = millis;
 	}
 
     pub fn run(&mut self) {
@@ -86,7 +91,7 @@ impl HttpServer {
         let conn_data = Arc::new(ConnectionData {
             router_map: safe_router,
             conn_config: ConnectionConfig {
-                read_time_out: 5 * 1000,
+                read_time_out: self.config_.read_timeout,
             },
 			server_config:self.config_.clone()
         });

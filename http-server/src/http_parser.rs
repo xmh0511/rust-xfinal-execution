@@ -61,6 +61,7 @@ pub struct ConnectionData {
 #[derive(Clone)]
 pub struct ServerConfig {
     pub(super) upload_directory: String,
+	pub(super) read_timeout:u32
 }
 
 enum HasBody {
