@@ -7,7 +7,7 @@ pub mod thread_pool;
 mod http_parser;
 
 pub use http_parser::{
-    ConnectionConfig, ConnectionData, MiddleWare, Request, Response, Router, RouterMap, RouterValue,
+    ConnectionConfig, ConnectionData, MiddleWare, Request, Response, Router, RouterMap, RouterValue,ServerConfig
 };
 
 pub use macro_utilities::end_point;
@@ -28,6 +28,7 @@ pub struct HttpServer {
     end_point: EndPoint,
     thread_number: u16,
     router: HashMap<String, RouterValue>,
+	config_:ServerConfig
 }
 
 pub struct RouterRegister<'a> {
@@ -61,25 +62,33 @@ impl<'a> RouterRegister<'a> {
 
 impl HttpServer {
     pub fn create(end: EndPoint, count: u16) -> Self {
-        let _ = std::fs::create_dir("./upload");
         Self {
             end_point: end,
             thread_number: count,
             router: HashMap::new(),
+			config_:ServerConfig{
+				upload_directory:String::from("./upload")
+			}
         }
     }
+
+	fn create_directory(&self){
+		let _ = std::fs::create_dir(self.config_.upload_directory.clone());
+	}
 
     pub fn run(&mut self) {
         let [a, b, c, d] = self.end_point.ip_address;
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(a, b, c, d)), self.end_point.port);
         let listen = TcpListener::bind(socket);
         self.not_found_default_if_not_set();
+		self.create_directory();
         let safe_router = Arc::new(self.router.clone());
         let conn_data = Arc::new(ConnectionData {
             router_map: safe_router,
             conn_config: ConnectionConfig {
                 read_time_out: 5 * 1000,
             },
+			server_config:self.config_.clone()
         });
         match listen {
             Ok(x) => {

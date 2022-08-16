@@ -56,6 +56,11 @@ pub struct ConnectionConfig {
 pub struct ConnectionData {
     pub(super) router_map: RouterMap,
     pub(super) conn_config: ConnectionConfig,
+    pub(super) server_config: ServerConfig,
+}
+#[derive(Clone)]
+pub struct ServerConfig {
+    pub(super) upload_directory: String,
 }
 
 enum HasBody {
@@ -157,7 +162,13 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                         HasBody::Len(size) => match possible_body {
                             Some(partial_body) => {
                                 let mut body = partial_body;
-                                let body = read_body(&mut stream, &map, &mut body, size);
+                                let body = read_body(
+                                    &mut stream,
+                                    &map,
+                                    &mut body,
+                                    size,
+                                    &conn_data.server_config,
+                                );
                                 if let BodyContent::Bad = body {
                                     break;
                                 }
@@ -180,7 +191,13 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                             }
                             None => {
                                 let mut body: Vec<u8> = Vec::new();
-                                let body = read_body(&mut stream, &map, &mut body, size);
+                                let body = read_body(
+                                    &mut stream,
+                                    &map,
+                                    &mut body,
+                                    size,
+                                    &conn_data.server_config,
+                                );
                                 construct_http_event(
                                     &mut stream,
                                     &conn_data.router_map,
@@ -402,6 +419,7 @@ fn read_body<'a, 'b, 'c>(
     head_map: &HashMap<&'a str, &'b str>,
     body: &'c mut Vec<u8>,
     len: usize,
+    server_config: &ServerConfig,
 ) -> BodyContent<'c> {
     if len > 0 {
         let body_type_key = head_map.keys().find(|&&k| -> bool {
@@ -419,11 +437,17 @@ fn read_body<'a, 'b, 'c>(
                     // need to read out the remainder body content
                     let remainder = len - has_read_len;
                     //println!("need to read out the remainder body content");
-                    return read_body_according_to_type(stream, body_type, body, remainder);
+                    return read_body_according_to_type(
+                        stream,
+                        body_type,
+                        body,
+                        remainder,
+                        server_config,
+                    );
                 } else {
                     // body has completely read out when reading head
                     //println!("body has completely read out when reading head");
-                    return read_body_according_to_type(stream, body_type, body, 0);
+                    return read_body_according_to_type(stream, body_type, body, 0, server_config);
                 }
             }
             None => {
@@ -447,6 +471,7 @@ fn read_body_according_to_type<'a>(
     body_type: &str,
     container: &'a mut Vec<u8>,
     mut need_read_size: usize,
+    server_config: &ServerConfig,
 ) -> BodyContent<'a> {
     //println!("raw:{body_type}");
     let tp = body_type.to_lowercase();
@@ -496,6 +521,7 @@ fn read_body_according_to_type<'a>(
                         container,
                         (&boundary, &end_boundary),
                         need_read_size,
+                        server_config,
                     );
                     match r {
                         Ok(form) => {
@@ -717,6 +743,7 @@ fn read_multiple_form_body<'a>(
     body: &'a mut Vec<u8>,
     (boundary, end): (&String, &String),
     mut need_size: usize,
+    server_config: &ServerConfig,
 ) -> io::Result<HashMap<String, MultipleFormData<'a>>> {
     let mut state = 0;
     let mut buffs = Vec::new();
@@ -860,7 +887,8 @@ fn read_multiple_form_body<'a>(
                         let filename = config.1.unwrap();
                         let uid = uuid::Uuid::new_v4().to_string();
                         let extension = get_file_extension(&filename);
-                        let filepath = format!("./upload/{}{}", uid, extension);
+                        let filepath =
+                            format!("{}/{}{}", &server_config.upload_directory, uid, extension);
                         let mut file = MultipleFormFile {
                             filename: filename,
                             filepath: filepath,
@@ -1071,6 +1099,7 @@ fn read_multiple_form_body<'a>(
                     let text_len = r.1.len();
                     multiple_data_collection
                         .insert(name.0, MultipleFormData::Text(&r.1[0..text_len - 2]));
+                    //处理文本时, 包含了分隔符的\r\n，在这里去除
                 }
                 println!("{:#?}", multiple_data_collection);
                 return io::Result::Ok(multiple_data_collection);
