@@ -564,6 +564,30 @@ fn find_substr<'a>(slice: &'a [u8], sub: &'a [u8], start: usize) -> FindSet {
     }
 }
 
+fn find_substr_once(slice:&[u8], sub:&[u8],start:usize)-> FindSet{
+     let remainder = slice.len()  - start;
+	 if sub.len() > remainder{
+		FindSet{
+			find_pos: -1,
+			end_pos: 0,
+		}
+	 }else{
+		let end_pos = start + sub.len();
+		let compare_str = &slice[start..end_pos];
+		if compare_str == sub{
+			FindSet{
+				find_pos: start as i64,
+				end_pos: end_pos,
+			}
+		}else{
+			FindSet{
+				find_pos: -1,
+				end_pos: 0,
+			}
+		}
+	 }
+}
+
 fn is_file(slice: &[u8]) -> bool {
     let key = "filename=\"".as_bytes();
     match slice.windows(key.len()).position(|x| x == key) {
@@ -941,7 +965,7 @@ fn read_multiple_form_body<'a>(
                                         if u == b'\n' {
                                             let compare_len = len - pos;
                                             if compare_len >= crlf_boundary_sequence.len() {
-                                                let find_test = find_substr(
+                                                let find_test = find_substr_once(
                                                     &buffs,
                                                     &crlf_boundary_sequence,
                                                     pos,
@@ -969,7 +993,7 @@ fn read_multiple_form_body<'a>(
                                                     Ok(size) => {
                                                         need_size -= size;
                                                         buffs.extend_from_slice(&need_buff[..size]);
-                                                        let r = find_substr(
+                                                        let r = find_substr_once(
                                                             &buffs,
                                                             &crlf_boundary_sequence,
                                                             pos,
