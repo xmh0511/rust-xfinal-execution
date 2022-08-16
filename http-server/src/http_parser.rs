@@ -753,7 +753,7 @@ fn read_multiple_form_body<'a>(
 
                 if r.find_pos != -1 {
                     let mut subsequent = Vec::new();
-                    let start = r.end_pos as usize + 2; //跳过\r\n
+                    let start = r.end_pos as usize + 2; //--Boundary?? 跳过?? 有可能是\r\n
                     if start > buffs.len() {
                         let mut buff_two = [b'\0'; 2];
                         match stream.read_exact(&mut buff_two) {
@@ -768,7 +768,7 @@ fn read_multiple_form_body<'a>(
                     }
                     //println!("start pos:{start}, len:{}",buffs.len());
                     //println!("{:?}",&buffs[start..]);
-                    let is_end = find_substr(&buffs, &end_boundary_sequence, 0);
+                    let is_end = find_substr_once(&buffs, &end_boundary_sequence, 0);
                     // println!("need size: {}", need_size);
                     if is_end.find_pos == r.find_pos {
                         break 'Outer;
@@ -974,7 +974,7 @@ fn read_multiple_form_body<'a>(
                                                     file_handle.write(&buffs[0..pos]).unwrap();
                                                     state = 0;
                                                     let mut temp = Vec::new();
-                                                    temp.extend_from_slice(&buffs[pos..]);
+                                                    temp.extend_from_slice(&buffs[pos+2..]); //找\r\n--Boundary, 跳过\r\n
                                                     buffs = temp;
                                                     continue 'Outer;
                                                 } else {
@@ -1005,7 +1005,7 @@ fn read_multiple_form_body<'a>(
                                                                 .unwrap();
                                                             state = 0;
                                                             let mut temp = Vec::new();
-                                                            temp.extend_from_slice(&buffs[pos..]);
+                                                            temp.extend_from_slice(&buffs[pos+2..]);//找\r\n--Boundary, 跳过\r\n
                                                             buffs = temp;
                                                             continue 'Outer;
                                                         } else {
