@@ -229,10 +229,24 @@ pub struct ResponseChunked<'b, 'a> {
     res: &'b mut Response<'a>,
 }
 
+
 impl<'b, 'a> ResponseChunked<'b, 'a> {
+	fn get_map_key(map:& HashMap<String, String>,key:&str) ->Option<String>{
+		let r = map.keys().find(|&ik|{
+			if ik.to_lowercase() == key.to_lowercase(){
+				true
+			}else{
+				false
+			}
+		});
+		Some((r?).clone())
+	}
     pub fn chunked(&mut self) {
         self.res
             .add_header(String::from("Transfer-Encoding"), String::from("chunked"));
+		if let Some(key) = Self::get_map_key(&self.res.header_pair,"content-length"){
+			self.res.header_pair.remove(&key);
+		}
         self.res.chunked.enable = true;
 		self.res.chunked.range.0 = 0;
     }

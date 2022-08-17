@@ -19,6 +19,30 @@ pub use http_parser::connection::http_response_table::{
 
 use http_parser::connection::http_response_table::get_httpmethod_from_code;
 
+pub trait SerializationMethods{
+	fn serialize(&self) -> Vec<&'static str>;
+}
+
+impl SerializationMethods for u8{
+    fn serialize(&self) -> Vec<&'static str> {
+		let m = get_httpmethod_from_code(*self);
+		let mut r = Vec::new();
+		r.push(m);
+		r
+    }
+}
+
+impl SerializationMethods for &[u8]{
+    fn serialize(&self) -> Vec<&'static str> {
+		let mut r = Vec::new();
+		for e in *self{
+			let m = get_httpmethod_from_code(*e);
+			r.push(m);
+		}
+		r
+    }
+}
+
 #[derive(Debug)]
 pub struct EndPoint {
     pub port: u16,
@@ -35,16 +59,18 @@ pub struct HttpServer {
 pub struct RouterRegister<'a> {
     server: &'a mut HttpServer,
     path: &'a str,
-    method: &'a str,
+    methods: Vec<&'a str>,
 }
 
 impl<'a> RouterRegister<'a> {
     pub fn reg<F>(&mut self, f: F)
     where
-        F: Router + Send + Sync + 'static,
+        F: Router + Send + Sync + 'static+ Clone,
     {
-        let router_path = format!("{}{}", self.method, self.path);
-        self.server.router.insert(router_path, (None, Arc::new(f)));
+		for e in &self.methods{
+			let router_path = format!("{}{}", e, self.path);
+			self.server.router.insert(router_path, (None, Arc::new(f.clone())));
+		}
     }
 
     pub fn reg_with_middlewares<F>(
@@ -52,12 +78,14 @@ impl<'a> RouterRegister<'a> {
         middlewares: Vec<Arc<dyn MiddleWare + Send + Sync>>,
         f: F,
     ) where
-        F: Router + Send + Sync + 'static,
+        F: Router + Send + Sync + 'static + Clone,
     {
-        let router_path = format!("{}{}", self.method, self.path);
-        self.server
-            .router
-            .insert(router_path, (Some(middlewares), Arc::new(f)));
+		for e in &self.methods{
+			let router_path = format!("{}{}", e, self.path);
+			self.server
+				.router
+				.insert(router_path, (Some(middlewares.clone()), Arc::new(f.clone())));
+		}
     }
 }
 
@@ -130,11 +158,11 @@ impl HttpServer {
         }
     }
 
-    pub fn route<'a, const M: u8>(&'a mut self, path: &'a str) -> RouterRegister<'_> {
-        let method = get_httpmethod_from_code(M);
+    pub fn route<'a, T:SerializationMethods>(&'a mut self,methods:T, path: &'a str) -> RouterRegister<'_> {
+        //let method = get_httpmethod_from_code(M);
         RouterRegister {
             server: self,
-            method,
+            methods: methods.serialize(),
             path,
         }
     }
