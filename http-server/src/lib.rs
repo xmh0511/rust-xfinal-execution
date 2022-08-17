@@ -120,7 +120,7 @@ impl HttpServer {
                 pool.join();
             }
             Err(e) => {
-                println!("listen error, reason:{}", e.to_string());
+                panic!("listen error, the reason is: {}", e.to_string());
             }
         }
     }
