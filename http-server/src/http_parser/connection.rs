@@ -269,13 +269,15 @@ impl<'a> Response<'a> {
     }
 
     pub fn write_string(&mut self, v: &str, code: u16) -> ResponseChunked<'_, 'a> {
+		self.write_binary(v.into(),code)
+    }
+
+	pub fn write_binary(&mut self, v:Vec<u8>, code:u16)-> ResponseChunked<'_, 'a>{
         self.http_state = code;
         self.add_header(String::from("Content-length"), v.len().to_string());
-		let mut vec = Vec::new();
-		vec.extend_from_slice(v.as_bytes());
-        self.body = Some(vec);
+        self.body = Some(v);
         ResponseChunked { res: self }
-    }
+	}
 
     pub fn write_state(&mut self, code: u16) {
         self.http_state = code;
