@@ -96,7 +96,7 @@ impl HttpServer {
 					panic!("{}",e.to_string())
 				}
             },
-        }
+        };
         let safe_router = Arc::new(self.router.clone());
         let conn_data = Arc::new(ConnectionData {
             router_map: safe_router,
