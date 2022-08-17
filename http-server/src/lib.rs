@@ -70,6 +70,7 @@ impl HttpServer {
             config_: ServerConfig {
                 upload_directory: String::from("./upload"),
                 read_timeout: 5 * 1000,
+				chunk_size: 1024
             },
         }
     }
@@ -82,6 +83,10 @@ impl HttpServer {
     pub fn set_read_timeout(&mut self, millis: u32) {
         self.config_.read_timeout = millis;
     }
+
+	pub fn set_chunksize(&mut self, size:u32){
+		self.config_.chunk_size = size;
+	}
 
     pub fn run(&mut self) {
         let [a, b, c, d] = self.end_point.ip_address;

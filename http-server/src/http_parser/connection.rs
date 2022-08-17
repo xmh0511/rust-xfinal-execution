@@ -233,8 +233,23 @@ impl<'b, 'a> ResponseChunked<'b, 'a> {
     pub fn chunked(&mut self) {
         self.res
             .add_header(String::from("Transfer-Encoding"), String::from("chunked"));
-        self.res.chunked = true;
+        self.res.chunked.enable = true;
+		self.res.chunked.range.0 = 0;
     }
+}
+pub struct ChunkRange(pub(super) usize, pub(super) usize);
+pub struct ResponseChunkMeta{
+	pub(super) enable:bool,
+	pub(super) range:ChunkRange
+}
+
+impl ResponseChunkMeta{
+	pub(super) fn new(chunk_size:u32)->Self{
+		ResponseChunkMeta{
+			enable:false,
+			range:ChunkRange(0, chunk_size as usize)
+		}
+	}
 }
 
 pub struct Response<'a> {
@@ -242,7 +257,7 @@ pub struct Response<'a> {
     pub(super) version: &'a str,
     pub(super) http_state: u16,
     pub(super) body: Option<Vec<u8>>,
-    pub(super) chunked: bool,
+    pub(super) chunked: ResponseChunkMeta,
     pub(super) conn_: Rc<RefCell<&'a mut TcpStream>>,
 }
 

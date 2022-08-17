@@ -13,7 +13,7 @@ use std::{
 use uuid;
 
 pub mod connection;
-pub use connection::{BodyContent, MultipleFormData, MultipleFormFile, Request, Response};
+pub use connection::{BodyContent, MultipleFormData, MultipleFormFile, Request, Response,ResponseChunkMeta};
 
 pub trait Router {
     fn call(&self, req: &Request, res: &mut Response);
@@ -56,7 +56,8 @@ pub struct ConnectionData {
 #[derive(Clone)]
 pub struct ServerConfig {
     pub(super) upload_directory: String,
-	pub(super) read_timeout:u32
+	pub(super) read_timeout:u32,
+	pub(super) chunk_size:u32
 }
 
 enum HasBody {
@@ -92,6 +93,7 @@ fn construct_http_event(
     head_map: HashMap<&str, &str>,
     body: BodyContent,
     _need_alive: bool,
+	server_config: &ServerConfig
 ) {
     let conn = Rc::new(RefCell::new(stream));
     let request = Request {
@@ -107,7 +109,7 @@ fn construct_http_event(
         version,
         http_state: 200,
         body: None,
-        chunked: false,
+        chunked: ResponseChunkMeta::new(server_config.chunk_size),
         conn_: Rc::clone(&conn),
     };
     do_router(&router, &request, &mut response);
@@ -115,7 +117,7 @@ fn construct_http_event(
     //    response.add_header(String::from("Connection"), String::from("keep-alive"));
     // }
     let mut stream = conn.borrow_mut();
-    if !response.chunked {
+    if !response.chunked.enable {
         write_once(*stream, &mut response);
     } else {
         // chunked transfer
@@ -178,6 +180,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                     map,
                                     body,
                                     need_alive,
+									&conn_data.server_config,
                                 );
                                 if need_alive {
                                     continue 'Back;
@@ -203,6 +206,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                     map,
                                     body,
                                     need_alive,
+									&conn_data.server_config,
                                 );
                                 if need_alive {
                                     continue 'Back;
@@ -221,6 +225,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                 map,
                                 BodyContent::None,
                                 need_alive,
+								&conn_data.server_config,
                             );
                             if need_alive {
                                 continue 'Back;
