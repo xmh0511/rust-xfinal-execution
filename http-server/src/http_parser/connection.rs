@@ -266,7 +266,7 @@ impl<'a> Response<'a> {
         self.header_pair.insert(key, value);
     }
 
-    pub(super) fn to_string(&self) -> Vec<u8> {
+	pub(super) fn header_to_string(&self)->Vec<u8>{
 		let mut buffs = Vec::new();
         let state_text = http_response_table::get_httpstatus_from_code(self.http_state);
 		buffs.extend_from_slice(format!("{} {}", self.version, state_text).as_bytes());
@@ -274,6 +274,11 @@ impl<'a> Response<'a> {
             buffs.extend_from_slice(format!("{}:{}\r\n", k, v).as_bytes());
         }
         buffs.extend_from_slice(b"\r\n");
+		buffs
+	}
+
+    pub(super) fn to_string(&self) -> Vec<u8> {
+		let mut buffs = self.header_to_string();
         match &self.body {
             Some(v) => {
 				buffs.extend_from_slice(&v);

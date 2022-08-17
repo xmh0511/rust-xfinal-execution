@@ -13,7 +13,9 @@ use std::{
 use uuid;
 
 pub mod connection;
-pub use connection::{BodyContent, MultipleFormData, MultipleFormFile, Request, Response,ResponseChunkMeta};
+pub use connection::{
+    BodyContent, MultipleFormData, MultipleFormFile, Request, Response, ResponseChunkMeta,
+};
 
 pub trait Router {
     fn call(&self, req: &Request, res: &mut Response);
@@ -47,7 +49,6 @@ where
     }
 }
 
-
 #[derive(Clone)]
 pub struct ConnectionData {
     pub(super) router_map: RouterMap,
@@ -56,8 +57,8 @@ pub struct ConnectionData {
 #[derive(Clone)]
 pub struct ServerConfig {
     pub(super) upload_directory: String,
-	pub(super) read_timeout:u32,
-	pub(super) chunk_size:u32
+    pub(super) read_timeout: u32,
+    pub(super) chunk_size: u32,
 }
 
 enum HasBody {
@@ -93,8 +94,8 @@ fn construct_http_event(
     head_map: HashMap<&str, &str>,
     body: BodyContent,
     _need_alive: bool,
-	server_config: &ServerConfig
-) {
+    server_config: &ServerConfig,
+)->bool {
     let conn = Rc::new(RefCell::new(stream));
     let request = Request {
         header_pair: head_map,
@@ -118,10 +119,24 @@ fn construct_http_event(
     // }
     let mut stream = conn.borrow_mut();
     if !response.chunked.enable {
-        write_once(*stream, &mut response);
+        match write_once(*stream, &mut response){
+            Ok(_) => {},
+            Err(e) => {
+                println!("write error:{}",e.to_string());
+				return false
+			},
+        }
     } else {
         // chunked transfer
+        match write_chunk(*stream, &mut response) {
+            Ok(_) => {},
+            Err(e) => {
+				println!("write error:{}",e.to_string());
+				return false;
+			},
+        }
     }
+	true
 }
 
 fn is_keep_alive(head_map: &HashMap<&str, &str>) -> bool {
@@ -171,7 +186,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                     break;
                                 }
                                 //println!("{:?}", body);
-                                construct_http_event(
+                                let r = construct_http_event(
                                     &mut stream,
                                     &conn_data.router_map,
                                     method,
@@ -180,9 +195,9 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                     map,
                                     body,
                                     need_alive,
-									&conn_data.server_config,
+                                    &conn_data.server_config,
                                 );
-                                if need_alive {
+                                if need_alive && r {
                                     continue 'Back;
                                 } else {
                                     break;
@@ -197,7 +212,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                     size,
                                     &conn_data.server_config,
                                 );
-                                construct_http_event(
+                                let r = construct_http_event(
                                     &mut stream,
                                     &conn_data.router_map,
                                     method,
@@ -206,9 +221,9 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                     map,
                                     body,
                                     need_alive,
-									&conn_data.server_config,
+                                    &conn_data.server_config,
                                 );
-                                if need_alive {
+                                if need_alive && r {
                                     continue 'Back;
                                 } else {
                                     break;
@@ -216,7 +231,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                             }
                         },
                         HasBody::None => {
-                            construct_http_event(
+                            let r = construct_http_event(
                                 &mut stream,
                                 &conn_data.router_map,
                                 method,
@@ -225,9 +240,9 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                 map,
                                 BodyContent::None,
                                 need_alive,
-								&conn_data.server_config,
+                                &conn_data.server_config,
                             );
-                            if need_alive {
+                            if need_alive && r {
                                 continue 'Back;
                             } else {
                                 break;
@@ -259,19 +274,44 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
     //println!("totally exit");
 }
 
-fn write_once(stream: &mut TcpStream, response: &mut Response) {
+fn write_once(stream: &mut TcpStream, response: &mut Response)->io::Result<()> {
     let s = response.to_string();
-    match stream.write(&s) {
-        Ok(_) => {
-            //println!("write size:{}", x);
-            if let Err(e) = stream.flush() {
-                println!("stream flush error:{}", e.to_string());
-            };
-        }
-        Err(e) => {
-            println!("stream write error:{}", e.to_string());
-        }
+	stream.write(&s)?;
+	stream.flush()?;
+	Ok(())
+}
+
+fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()> {
+    let header = response.header_to_string();
+    let _ = stream.write(&header)?;
+    stream.flush()?;
+    let mut start = response.chunked.range.0;
+    let chunked_size = response.chunked.range.1;
+    let body = match &response.body {
+        Some(buffs) => buffs,
+        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "body is empty")),
     };
+    loop {
+        if start >= body.len() {
+            break;
+        }
+        let mut end = start + chunked_size;
+        if end > body.len() {
+            end = body.len();
+        }
+        let slice = &body[start..end];
+        let size = end - start;
+        let size = format!("{:X}", size);
+        stream.write(size.as_bytes())?;
+        stream.write(b"\r\n")?;
+        stream.write(slice)?;
+        stream.write(b"\r\n")?;
+        stream.flush()?;
+        start = end;
+    }
+    stream.write(b"0\r\n\r\n")?;
+    stream.flush()?;
+    Ok(())
 }
 
 fn read_http_head(stream: &mut TcpStream) -> Result<(String, Option<Vec<u8>>), bool> {
