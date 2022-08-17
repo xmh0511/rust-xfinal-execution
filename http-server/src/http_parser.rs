@@ -14,7 +14,8 @@ use uuid;
 
 pub mod connection;
 pub use connection::{
-    BodyContent, MultipleFormData, MultipleFormFile, Request, Response, ResponseChunkMeta,
+    BodyContent, BodyType, MultipleFormData, MultipleFormFile, Request, Response,
+    ResponseChunkMeta, ResponseRangeMeta,
 };
 
 pub trait Router {
@@ -95,10 +96,10 @@ fn construct_http_event(
     body: BodyContent,
     _need_alive: bool,
     server_config: &ServerConfig,
-)->bool {
+) -> bool {
     let conn = Rc::new(RefCell::new(stream));
     let request = Request {
-        header_pair: head_map,
+        header_pair: head_map.clone(),
         url,
         method,
         version,
@@ -108,10 +109,13 @@ fn construct_http_event(
     let mut response = Response {
         header_pair: HashMap::new(),
         version,
+        method,
         http_state: 200,
-        body: None,
+        body: BodyType::None,
         chunked: ResponseChunkMeta::new(server_config.chunk_size),
         conn_: Rc::clone(&conn),
+        range: ResponseRangeMeta::None,
+		request_header:head_map
     };
     do_router(&router, &request, &mut response);
     // if need_alive{
@@ -119,24 +123,24 @@ fn construct_http_event(
     // }
     let mut stream = conn.borrow_mut();
     if !response.chunked.enable {
-        match write_once(*stream, &mut response){
-            Ok(_) => {},
+        match write_once(*stream, &mut response) {
+            Ok(_) => {}
             Err(e) => {
-                println!("write error:{}",e.to_string());
-				return false
-			},
+                println!("write error:{}", e.to_string());
+                return false;
+            }
         }
     } else {
         // chunked transfer
         match write_chunk(*stream, &mut response) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => {
-				println!("write error:{}",e.to_string());
-				return false;
-			},
+                println!("write error:{}", e.to_string());
+                return false;
+            }
         }
     }
-	true
+    true
 }
 
 fn is_keep_alive(head_map: &HashMap<&str, &str>) -> bool {
@@ -274,22 +278,28 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
     //println!("totally exit");
 }
 
-fn write_once(stream: &mut TcpStream, response: &mut Response)->io::Result<()> {
+fn write_once(stream: &mut TcpStream, response: &mut Response) -> io::Result<()> {
     let s = response.to_string();
-	stream.write(&s)?;
-	stream.flush()?;
-	Ok(())
+    stream.write(&s)?;
+    stream.flush()?;
+    Ok(())
 }
 
 fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()> {
     let header = response.header_to_string();
     let _ = stream.write(&header)?;
     stream.flush()?;
+    if response.method == "HEAD" {
+        return Ok(());
+    }
     let mut start = response.chunked.range.0;
     let chunked_size = response.chunked.range.1;
     let body = match &response.body {
-        Some(buffs) => buffs,
-        None => return Err(io::Error::new(io::ErrorKind::InvalidData, "body is empty")),
+        BodyType::Memory(buffs) => buffs,
+        BodyType::File(path) => {
+            todo!()
+        }
+        BodyType::None => return Err(io::Error::new(io::ErrorKind::InvalidData, "body is empty")),
     };
     loop {
         if start >= body.len() {

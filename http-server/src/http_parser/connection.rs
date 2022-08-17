@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::Read;
 use std::net::TcpStream;
 
 use std::rc::Rc;
@@ -189,17 +190,17 @@ impl<'a> Request<'a> {
             let mut vec = Vec::new();
             for (_k, v) in x {
                 match v {
-                    MultipleFormData::Text(_) =>{},
+                    MultipleFormData::Text(_) => {}
                     MultipleFormData::File(file) => {
-						vec.push(file);
-					},
+                        vec.push(file);
+                    }
                 }
             }
-			if vec.len() !=0{
-				return Some(vec);
-			}else{
-				return None;
-			}
+            if vec.len() != 0 {
+                return Some(vec);
+            } else {
+                return None;
+            }
         } else {
             None
         }
@@ -225,98 +226,230 @@ impl<'a> Request<'a> {
     }
 }
 
-pub struct ResponseChunked<'b, 'a> {
+pub struct ResponseConfig<'b, 'a> {
     res: &'b mut Response<'a>,
 }
 
-
-impl<'b, 'a> ResponseChunked<'b, 'a> {
-	fn get_map_key(map:& HashMap<String, String>,key:&str) ->Option<String>{
-		let r = map.keys().find(|&ik|{
-			if ik.to_lowercase() == key.to_lowercase(){
-				true
-			}else{
-				false
-			}
-		});
-		Some((r?).clone())
-	}
-    pub fn chunked(&mut self) {
+impl<'b, 'a> ResponseConfig<'b, 'a> {
+    fn get_map_key(map: &HashMap<String, String>, key: &str) -> Option<String> {
+        let r = map.keys().find(|&ik| {
+            if ik.to_lowercase() == key.to_lowercase() {
+                true
+            } else {
+                false
+            }
+        });
+        Some((r?).clone())
+    }
+    pub fn chunked(&mut self) -> &mut Self {
+        if self.res.method == "HEAD" {
+            return self;
+        }
         self.res
             .add_header(String::from("Transfer-Encoding"), String::from("chunked"));
-		if let Some(key) = Self::get_map_key(&self.res.header_pair,"content-length"){
-			self.res.header_pair.remove(&key);
-		}
+        if let Some(key) = Self::get_map_key(&self.res.header_pair, "content-length") {
+            self.res.header_pair.remove(&key);
+        }
         self.res.chunked.enable = true;
-		self.res.chunked.range.0 = 0;
+        self.res.chunked.range.0 = 0;
+        self
+    }
+
+    pub fn enable_range(&mut self) {
+        if self.res.method == "HEAD" {
+            self.res
+                .add_header(String::from("Accept-Ranges"), String::from("bytes"));
+            match &self.res.body {
+                BodyType::Memory(_) => {}
+                BodyType::File(path) => match std::fs::OpenOptions::new().read(true).open(path) {
+                    Ok(file) => {
+                        let file_size = file.metadata().unwrap().len();
+                        self.res
+                            .add_header(String::from("Content-length"), file_size.to_string());
+                    }
+                    Err(_) => {
+                        self.res.write_state(404);
+                    }
+                },
+                BodyType::None => self.res.write_state(400),
+            }
+        } else {
+            match self.res.get_request_header_value("Range") {
+                Some(v) => {
+                    parse_range_content(v);
+                }
+                None => {
+                    self.res.range = ResponseRangeMeta::None;
+                }
+            }
+        }
     }
 }
-pub struct ChunkRange(pub(super) usize, pub(super) usize);
-pub struct ResponseChunkMeta{
-	pub(super) enable:bool,
-	pub(super) range:ChunkRange
+
+fn parse_range_content(v: &str) {
+    match v.trim().split_once("=") {
+        Some(v) => {
+            let v = v.1;
+            match v.trim().split_once("-") {
+                Some(v) => {
+                    let start;
+                    let end;
+                    if v.0 != "" {
+                        let r: u64 = v.0.parse().unwrap_or_else(|_| 0);
+                        if r == 0 {
+                            start = None;
+                        } else {
+                            start = Some(r);
+                        }
+                    } else {
+                        start = None;
+                    }
+                    if v.1 != "" {
+                        let r: u64 = v.1.parse().unwrap_or_else(|_| 0);
+                        if r == 0 {
+                            end = None;
+                        } else {
+                            end = Some(r);
+                        }
+                    } else {
+                        end = None;
+                    }
+                    ResponseRangeMeta::Range(start, end);
+                }
+                None => {
+                    ResponseRangeMeta::Range(None, None);
+                }
+            }
+        }
+        None => {
+            ResponseRangeMeta::Range(None, None);
+        }
+    }
 }
 
-impl ResponseChunkMeta{
-	pub(super) fn new(chunk_size:u32)->Self{
-		ResponseChunkMeta{
-			enable:false,
-			range:ChunkRange(0, chunk_size as usize)
-		}
-	}
+pub struct ChunkRange(pub(super) usize, pub(super) usize);
+pub struct ResponseChunkMeta {
+    pub(super) enable: bool,
+    pub(super) range: ChunkRange,
+}
+
+impl ResponseChunkMeta {
+    pub(super) fn new(chunk_size: u32) -> Self {
+        ResponseChunkMeta {
+            enable: false,
+            range: ChunkRange(0, chunk_size as usize),
+        }
+    }
+}
+
+pub enum ResponseRangeMeta {
+    Range(Option<u64>, Option<u64>),
+    None,
+}
+
+pub enum BodyType {
+    Memory(Vec<u8>),
+    File(String),
+    None,
 }
 
 pub struct Response<'a> {
     pub(super) header_pair: HashMap<String, String>,
     pub(super) version: &'a str,
+    pub(super) method: &'a str,
     pub(super) http_state: u16,
-    pub(super) body: Option<Vec<u8>>,
+    pub(super) body: BodyType,
     pub(super) chunked: ResponseChunkMeta,
     pub(super) conn_: Rc<RefCell<&'a mut TcpStream>>,
+    pub(super) range: ResponseRangeMeta,
+    pub(super) request_header: HashMap<&'a str, &'a str>,
 }
 
 impl<'a> Response<'a> {
+    fn get_request_header_value(&mut self, k: &str) -> Option<&str> {
+        match self.request_header.keys().find(|&&ik| {
+            if k.to_lowercase() == ik.to_lowercase() {
+                true
+            } else {
+                false
+            }
+        }) {
+            Some(k) => Some(self.request_header.get(*k).unwrap()),
+            None => None,
+        }
+    }
+
     pub fn add_header(&mut self, key: String, value: String) {
         self.header_pair.insert(key, value);
     }
 
-	pub(super) fn header_to_string(&self)->Vec<u8>{
-		let mut buffs = Vec::new();
+    pub(super) fn header_to_string(&self) -> Vec<u8> {
+        let mut buffs = Vec::new();
         let state_text = http_response_table::get_httpstatus_from_code(self.http_state);
-		buffs.extend_from_slice(format!("{} {}", self.version, state_text).as_bytes());
+        buffs.extend_from_slice(format!("{} {}", self.version, state_text).as_bytes());
         for (k, v) in &self.header_pair {
             buffs.extend_from_slice(format!("{}:{}\r\n", k, v).as_bytes());
         }
         buffs.extend_from_slice(b"\r\n");
-		buffs
-	}
+        buffs
+    }
 
     pub(super) fn to_string(&self) -> Vec<u8> {
-		let mut buffs = self.header_to_string();
+        let mut buffs = self.header_to_string();
+        if self.method == "HEAD" {
+            return buffs;
+        }
         match &self.body {
-            Some(v) => {
-				buffs.extend_from_slice(&v);
-				buffs
+            BodyType::Memory(v) => {
+                buffs.extend_from_slice(&v);
+                buffs
             }
-            None => buffs,
+            BodyType::File(path) => match std::fs::OpenOptions::new().read(true).open(path) {
+                Ok(mut file) => {
+                    let start = buffs.len();
+                    let len = file.metadata().unwrap().len();
+                    let need_size = len as usize + start;
+                    buffs.resize(need_size, b'\0');
+                    file.read(&mut buffs[start..]).unwrap();
+                    buffs
+                }
+                Err(_) => buffs,
+            },
+            BodyType::None => buffs,
         }
     }
 
-    pub fn write_string(&mut self, v: &str, code: u16) -> ResponseChunked<'_, 'a> {
-		self.write_binary(v.into(),code)
+    pub fn write_string(&mut self, v: &str, code: u16) -> ResponseConfig<'_, 'a> {
+        self.write_binary(v.into(), code)
     }
 
-	pub fn write_binary(&mut self, v:Vec<u8>, code:u16)-> ResponseChunked<'_, 'a>{
+    pub fn write_binary(&mut self, v: Vec<u8>, code: u16) -> ResponseConfig<'_, 'a> {
         self.http_state = code;
         self.add_header(String::from("Content-length"), v.len().to_string());
-        self.body = Some(v);
-        ResponseChunked { res: self }
-	}
+        self.body = BodyType::Memory(v);
+        ResponseConfig { res: self }
+    }
 
     pub fn write_state(&mut self, code: u16) {
         self.http_state = code;
         self.add_header(String::from("Content-length"), 0.to_string());
-        self.body = None;
+        self.body = BodyType::None;
+    }
+
+    pub fn write_file(&mut self, path: String, code: u16) -> ResponseConfig<'_, 'a> {
+        match std::fs::OpenOptions::new().read(true).open(path.clone()) {
+            Ok(file) => {
+                let len = file.metadata().unwrap().len();
+                self.add_header(String::from("Content-length"), len.to_string());
+            }
+            Err(_) => {
+                self.write_string(&format!("{} not found", path), 404);
+                return ResponseConfig { res: self };
+            }
+        }
+        self.http_state = code;
+        self.body = BodyType::File(path);
+        ResponseConfig { res: self }
     }
 
     pub fn get_conn(&self) -> Rc<RefCell<&'a mut TcpStream>> {

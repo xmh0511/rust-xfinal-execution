@@ -29,8 +29,13 @@ fn main() {
                 .unwrap();
             let mut vec = Vec::new();
             file.read_to_end(&mut vec).unwrap();
-            res.write_string(std::str::from_utf8(&vec).unwrap(), 200)
-                .chunked();
+            res.write_binary(vec, 200).chunked();
+        });
+
+    http_server
+        .route(GET, "/file")
+        .reg(|_req: &Request, res: &mut Response| {
+            res.write_file(String::from("./upload/test.txt"), 200);
         });
 
     http_server.set_not_found(|_req: &Request, res: &mut Response| {
