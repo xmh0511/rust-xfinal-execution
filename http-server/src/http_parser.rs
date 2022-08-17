@@ -256,7 +256,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
 
 fn write_once(stream: &mut TcpStream, response: &mut Response) {
     let s = response.to_string();
-    match stream.write(s.as_bytes()) {
+    match stream.write(&s) {
         Ok(_) => {
             //println!("write size:{}", x);
             if let Err(e) = stream.flush() {

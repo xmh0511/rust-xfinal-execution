@@ -241,7 +241,7 @@ pub struct Response<'a> {
     pub(super) header_pair: HashMap<String, String>,
     pub(super) version: &'a str,
     pub(super) http_state: u16,
-    pub(super) body: Option<String>,
+    pub(super) body: Option<Vec<u8>>,
     pub(super) chunked: bool,
     pub(super) conn_: Rc<RefCell<&'a mut TcpStream>>,
 }
@@ -251,26 +251,29 @@ impl<'a> Response<'a> {
         self.header_pair.insert(key, value);
     }
 
-    pub(super) fn to_string(&self) -> String {
+    pub(super) fn to_string(&self) -> Vec<u8> {
+		let mut buffs = Vec::new();
         let state_text = http_response_table::get_httpstatus_from_code(self.http_state);
-        let mut s = format!("{} {}", self.version, state_text);
+		buffs.extend_from_slice(format!("{} {}", self.version, state_text).as_bytes());
         for (k, v) in &self.header_pair {
-            s += &format!("{}:{}\r\n", k, v);
+            buffs.extend_from_slice(format!("{}:{}\r\n", k, v).as_bytes());
         }
-        s += "\r\n";
+        buffs.extend_from_slice(b"\r\n");
         match &self.body {
             Some(v) => {
-                s += &*v;
-                s
+				buffs.extend_from_slice(&v);
+				buffs
             }
-            None => s,
+            None => buffs,
         }
     }
 
-    pub fn write_string(&mut self, v: String, code: u16) -> ResponseChunked<'_, 'a> {
+    pub fn write_string(&mut self, v: &str, code: u16) -> ResponseChunked<'_, 'a> {
         self.http_state = code;
         self.add_header(String::from("Content-length"), v.len().to_string());
-        self.body = Some(v);
+		let mut vec = Vec::new();
+		vec.extend_from_slice(v.as_bytes());
+        self.body = Some(vec);
         ResponseChunked { res: self }
     }
 

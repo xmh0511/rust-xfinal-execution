@@ -9,17 +9,17 @@ fn main() {
         .route::<GET>("/")
         .reg(|_req: &Request, res: &mut Response| {
 			//println!("{:?}",req.get_header("Connection"));
-            res.write_string(String::from("hello from router"), 200);
+            res.write_string("hello from router", 200);
         });
 
     http_server
         .route::<POST>("/post")
         .reg(|_req: &Request, res: &mut Response| {
-            res.write_string(String::from("hello from router"), 200);
+            res.write_string("hello from router", 200);
     });
 
     http_server.set_not_found(|_req: &Request, res: &mut Response|{
-        res.write_string("not found".to_string(), 404);
+        res.write_string("not found", 404);
     });
 
     let middlewares = inject_middlewares! {
@@ -37,7 +37,7 @@ fn main() {
         middlewares,
         |_req: &Request, res: &mut Response| {
             println!("invoke router");
-            res.write_string(String::from("hello from router"), 200);
+            res.write_string("hello from router", 200);
         },
     );
     http_server.run();
