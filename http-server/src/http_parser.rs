@@ -47,15 +47,10 @@ where
     }
 }
 
-#[derive(Clone)]
-pub struct ConnectionConfig {
-    pub(super) read_time_out: u32,
-}
 
 #[derive(Clone)]
 pub struct ConnectionData {
     pub(super) router_map: RouterMap,
-    pub(super) conn_config: ConnectionConfig,
     pub(super) server_config: ServerConfig,
 }
 #[derive(Clone)]
@@ -150,7 +145,7 @@ fn is_keep_alive(head_map: &HashMap<&str, &str>) -> bool {
 
 pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)) {
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(
-        conn_data.conn_config.read_time_out as u64,
+        conn_data.server_config.read_timeout as u64,
     )));
     'Back: loop {
         let read_result = read_http_head(&mut stream);

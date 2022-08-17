@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::sync::Arc;
 
@@ -7,7 +8,7 @@ pub mod thread_pool;
 mod http_parser;
 
 pub use http_parser::{
-    ConnectionConfig, ConnectionData, MiddleWare, Request, Response, Router, RouterMap, RouterValue,ServerConfig
+    ConnectionData, MiddleWare, Request, Response, Router, RouterMap, RouterValue, ServerConfig,
 };
 
 pub use macro_utilities::end_point;
@@ -28,7 +29,7 @@ pub struct HttpServer {
     end_point: EndPoint,
     thread_number: u16,
     router: HashMap<String, RouterValue>,
-	config_:ServerConfig
+    config_: ServerConfig,
 }
 
 pub struct RouterRegister<'a> {
@@ -66,34 +67,40 @@ impl HttpServer {
             end_point: end,
             thread_number: count,
             router: HashMap::new(),
-			config_:ServerConfig{
-				upload_directory:String::from("./upload"),
-				read_timeout: 5*1000
-			}
+            config_: ServerConfig {
+                upload_directory: String::from("./upload"),
+                read_timeout: 5 * 1000,
+            },
         }
     }
 
-	fn create_directory(&self){
-		let _ = std::fs::create_dir(self.config_.upload_directory.clone());
-	}
+    fn create_directory(&self) -> io::Result<bool> {
+        let _ = std::fs::create_dir(self.config_.upload_directory.clone())?;
+        Ok(true)
+    }
 
-	pub fn set_read_timeout(& mut self, millis:u32){
-		self.config_.read_timeout = millis;
-	}
+    pub fn set_read_timeout(&mut self, millis: u32) {
+        self.config_.read_timeout = millis;
+    }
 
     pub fn run(&mut self) {
         let [a, b, c, d] = self.end_point.ip_address;
         let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(a, b, c, d)), self.end_point.port);
         let listen = TcpListener::bind(socket);
         self.not_found_default_if_not_set();
-		self.create_directory();
+        match self.create_directory() {
+            Ok(_) => {}
+            Err(e) => match e.kind() {
+                io::ErrorKind::AlreadyExists => {}
+                _ => {
+					panic!("{}",e.to_string())
+				}
+            },
+        }
         let safe_router = Arc::new(self.router.clone());
         let conn_data = Arc::new(ConnectionData {
             router_map: safe_router,
-            conn_config: ConnectionConfig {
-                read_time_out: self.config_.read_timeout,
-            },
-			server_config:self.config_.clone()
+            server_config: self.config_.clone(),
         });
         match listen {
             Ok(x) => {
