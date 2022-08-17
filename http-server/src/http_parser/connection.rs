@@ -5,8 +5,11 @@ use std::net::TcpStream;
 
 use std::rc::Rc;
 
+use std::io;
+use std::io::prelude::*;
+
 pub mod http_response_table {
-    const STATE_TABLE: [(u16, &str); 19] = [
+    const STATE_TABLE: [(u16, &str); 20] = [
         (101, "101 Switching Protocals\r\n"),
         (200, "200 OK\r\n"),
         (201, "201 Created\r\n"),
@@ -22,6 +25,7 @@ pub mod http_response_table {
         (403, "403 Forbidden\r\n"),
         (404, "404 Not Found\r\n"),
         (413, "413 Request Entity Too Large\r\n"),
+        (416, "416 Requested Range Not Satisfiable\r\n"),
         (500, "500 Internal Server Error\r\n"),
         (501, "501 Not Implemented\r\n"),
         (502, "502 Bad Gateway\r\n"),
@@ -260,7 +264,10 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
             self.res
                 .add_header(String::from("Accept-Ranges"), String::from("bytes"));
             match &self.res.body {
-                BodyType::Memory(_) => {}
+                BodyType::Memory(buffs) => {
+                    self.res
+                        .add_header(String::from("Content-length"), buffs.len().to_string());
+                }
                 BodyType::File(path) => match std::fs::OpenOptions::new().read(true).open(path) {
                     Ok(file) => {
                         let file_size = file.metadata().unwrap().len();
@@ -271,12 +278,12 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
                         self.res.write_state(404);
                     }
                 },
-                BodyType::None => self.res.write_state(400),
+                BodyType::None => {}
             }
         } else {
             match self.res.get_request_header_value("Range") {
                 Some(v) => {
-                    parse_range_content(v);
+                    self.res.range =  parse_range_content(v);
                 }
                 None => {
                     self.res.range = ResponseRangeMeta::None;
@@ -286,7 +293,7 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
     }
 }
 
-fn parse_range_content(v: &str) {
+fn parse_range_content(v: &str) -> ResponseRangeMeta{
     match v.trim().split_once("=") {
         Some(v) => {
             let v = v.1;
@@ -314,15 +321,15 @@ fn parse_range_content(v: &str) {
                     } else {
                         end = None;
                     }
-                    ResponseRangeMeta::Range(start, end);
+                    ResponseRangeMeta::Range(start, end)
                 }
                 None => {
-                    ResponseRangeMeta::Range(None, None);
+                    ResponseRangeMeta::Range(None, None)
                 }
             }
         }
         None => {
-            ResponseRangeMeta::Range(None, None);
+            ResponseRangeMeta::Range(None, None)
         }
     }
 }
@@ -379,6 +386,24 @@ impl<'a> Response<'a> {
         }
     }
 
+    pub fn remove_header(&mut self, key: String) {
+        let r = self.header_pair.keys().find(|&ik| {
+            if key.to_lowercase() == ik.to_lowercase() {
+                true
+            } else {
+                false
+            }
+        });
+        match r {
+            Some(k) => {
+                let s = k.clone();
+                let map = &mut self.header_pair;
+                map.remove(&s);
+            }
+            None => {}
+        }
+    }
+
     pub fn add_header(&mut self, key: String, value: String) {
         self.header_pair.insert(key, value);
     }
@@ -394,28 +419,94 @@ impl<'a> Response<'a> {
         buffs
     }
 
-    pub(super) fn to_string(&self) -> Vec<u8> {
-        let mut buffs = self.header_to_string();
-        if self.method == "HEAD" {
-            return buffs;
-        }
+    fn take_body_size(&mut self) -> io::Result<u64> {
         match &self.body {
-            BodyType::Memory(v) => {
-                buffs.extend_from_slice(&v);
-                buffs
-            }
+            BodyType::Memory(buff) => Ok(buff.len() as u64),
             BodyType::File(path) => match std::fs::OpenOptions::new().read(true).open(path) {
-                Ok(mut file) => {
-                    let start = buffs.len();
-                    let len = file.metadata().unwrap().len();
-                    let need_size = len as usize + start;
-                    buffs.resize(need_size, b'\0');
-                    file.read(&mut buffs[start..]).unwrap();
-                    buffs
-                }
-                Err(_) => buffs,
+                Ok(file) => Ok(file.metadata()?.len()),
+                Err(e) => Err(e),
             },
-            BodyType::None => buffs,
+            BodyType::None => Ok(0),
+        }
+    }
+
+    pub(super) fn take_body_buff(&mut self) -> io::Result<Vec<u8>> {
+        match self.range {
+            ResponseRangeMeta::Range(start, end) => {
+                let mut beg_pos;
+                let end_pos;
+                let body_size = self.take_body_size()?;
+                let mut lack_beg = false;
+                if let Some(x) = start {
+                    beg_pos = x;
+                } else {
+                    beg_pos = 0;
+                    lack_beg = true;
+                }
+                if let Some(x) = end {
+                    if lack_beg {
+                        end_pos = body_size  - 1;
+                        beg_pos = body_size - x;
+                    }else{
+                        end_pos = x;
+                    }
+                } else {
+                    if lack_beg{
+                        todo!()
+                    }
+                    end_pos = body_size - 1;
+                }
+                if beg_pos > end_pos || (beg_pos >= (body_size - 1)) || end_pos >= body_size {
+                    self.write_state(416);
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "bad range values"));
+                }
+
+                let v = format!("bytes {}-{}/{}", beg_pos, end_pos, body_size);
+                let len = (end_pos - beg_pos + 1).to_string();
+                self.add_header(String::from("Content-Range"), v);
+                let key = "Content-Length".to_string();
+                self.remove_header(key.clone());
+
+                if !self.chunked.enable{
+                    self.add_header(key, len);
+                }
+
+                let mut ret_buff = Vec::new();
+                match &self.body {
+                    BodyType::Memory(buffs) => {
+                        ret_buff.extend_from_slice(&buffs[beg_pos as usize..=end_pos as usize]);
+                        return Ok(ret_buff);
+                    }
+                    BodyType::File(path) => {
+                        let mut file = std::fs::OpenOptions::new().read(true).open(path)?;
+                        let need_size = end_pos - beg_pos + 1;
+                        let len = ret_buff.len();
+                        ret_buff.resize(need_size as usize + len, b'\0');
+                        file.seek(std::io::SeekFrom::Start(beg_pos))?;
+                        file.read(&mut ret_buff)?;
+                        return Ok(ret_buff);
+                    }
+                    BodyType::None => {
+                        let buff =Vec::new();
+                        return Ok(buff);
+                    }
+                };
+            }
+            ResponseRangeMeta::None => match &self.body {
+                BodyType::Memory(buffs) => {
+                    return Ok(buffs.clone());
+                }
+                BodyType::File(path) => {
+                    let mut buff = Vec::new();
+                    let mut file = std::fs::OpenOptions::new().read(true).open(path)?;
+                    file.read_to_end(& mut buff)?;
+                    return Ok(buff);
+                }
+                BodyType::None => {
+                    let buff = Vec::new();
+                    return Ok(buff);
+                }
+            },
         }
     }
 

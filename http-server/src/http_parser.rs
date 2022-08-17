@@ -115,7 +115,7 @@ fn construct_http_event(
         chunked: ResponseChunkMeta::new(server_config.chunk_size),
         conn_: Rc::clone(&conn),
         range: ResponseRangeMeta::None,
-		request_header:head_map
+        request_header: head_map,
     };
     do_router(&router, &request, &mut response);
     // if need_alive{
@@ -278,11 +278,22 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
     //println!("totally exit");
 }
 
+
+
 fn write_once(stream: &mut TcpStream, response: &mut Response) -> io::Result<()> {
-    let s = response.to_string();
-    stream.write(&s)?;
-    stream.flush()?;
-    Ok(())
+    if response.method == "HEAD" {
+        let s = response.header_to_string();
+        stream.write(&s)?;
+        stream.flush()?;
+        Ok(())
+    } else {
+        let buffs = response.take_body_buff()?;
+        let s = response.header_to_string();
+        stream.write(&s)?;
+        stream.write(&buffs)?;
+        stream.flush()?;
+        Ok(())
+    }
 }
 
 fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()> {
@@ -294,13 +305,7 @@ fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()
     }
     let mut start = response.chunked.range.0;
     let chunked_size = response.chunked.range.1;
-    let body = match &response.body {
-        BodyType::Memory(buffs) => buffs,
-        BodyType::File(path) => {
-            todo!()
-        }
-        BodyType::None => return Err(io::Error::new(io::ErrorKind::InvalidData, "body is empty")),
-    };
+    let body = response.take_body_buff()?;
     loop {
         if start >= body.len() {
             break;
