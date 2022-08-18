@@ -286,6 +286,7 @@ impl<'a> Request<'a> {
 
 pub struct ResponseConfig<'b, 'a> {
     res: &'b mut Response<'a>,
+    has_failure:bool
 }
 
 impl<'b, 'a> ResponseConfig<'b, 'a> {
@@ -300,6 +301,9 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
         Some((r?).clone())
     }
     pub fn chunked(&mut self) -> &mut Self {
+        if self.has_failure{
+            return self;
+        }
         if self.res.method == "HEAD" {
             return self;
         }
@@ -312,7 +316,18 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
         self
     }
 
+    pub fn status(&mut self,code:u16)-> &mut Self{
+        if self.has_failure{
+            return self;
+        }
+        self.res.http_state = code;
+        self
+    }
+
     pub fn specify_file_name(&mut self, name: &str) -> &mut Self {
+        if self.has_failure{
+            return self;
+        }
         match &self.res.body {
             BodyType::Memory(_) => {}
             BodyType::File(_) => {
@@ -329,6 +344,9 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
     }
 
     pub fn enable_range(&mut self) -> &mut Self {
+        if self.has_failure{
+            return self;
+        }
         if self.res.method == "HEAD" {
             self.res
                 .add_header(String::from("Accept-Ranges"), String::from("bytes"));
@@ -619,15 +637,14 @@ impl<'a> Response<'a> {
             None => false,
         }
     }
-    pub fn write_string(&mut self, v: &str, code: u16) -> ResponseConfig<'_, 'a> {
-        self.write_binary(v.into(), code)
+    pub fn write_string(&mut self, v: &str) -> ResponseConfig<'_, 'a> {
+        self.write_binary(v.into())
     }
 
-    pub fn write_binary(&mut self, v: Vec<u8>, code: u16) -> ResponseConfig<'_, 'a> {
-        self.http_state = code;
+    pub fn write_binary(&mut self, v: Vec<u8>) -> ResponseConfig<'_, 'a> {
         self.add_header(String::from("Content-length"), v.len().to_string());
         self.body = BodyType::Memory(v);
-        ResponseConfig { res: self }
+        ResponseConfig { res: self ,has_failure:false}
     }
 
     pub fn write_state(&mut self, code: u16) {
@@ -636,7 +653,7 @@ impl<'a> Response<'a> {
         self.body = BodyType::None;
     }
 
-    pub fn write_file(&mut self, path: String, code: u16) -> ResponseConfig<'_, 'a> {
+    pub fn write_file(&mut self, path: String) -> ResponseConfig<'_, 'a> {
         match std::fs::OpenOptions::new().read(true).open(path.clone()) {
             Ok(file) => {
                 let len = file.metadata().unwrap().len();
@@ -661,13 +678,12 @@ impl<'a> Response<'a> {
                 }
             }
             Err(_) => {
-                self.write_string(&format!("{} file not found", path), 404);
-                return ResponseConfig { res: self };
+                self.write_string(&format!("{} file not found", path)).status(404);
+                return ResponseConfig { res: self, has_failure:true };
             }
         }
-        self.http_state = code;
         self.body = BodyType::File(path);
-        ResponseConfig { res: self }
+        ResponseConfig { res: self,has_failure:false }
     }
 
     pub fn get_conn(&self) -> Rc<RefCell<&'a mut TcpStream>> {

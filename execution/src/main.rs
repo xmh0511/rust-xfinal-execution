@@ -12,12 +12,12 @@ fn interrupt_one(req: &Request, res: &mut Response) -> bool {
 			if v == "1"{
 				true
 			}else{
-				res.write_string("invalid request, invalid id value", 400);
+				res.write_string("invalid request, invalid id value").status(400);
 				false
 			}
 		},
         None => {
-			res.write_string("invalid request, no id", 400);
+			res.write_string("invalid request, no id").status(400);
 			false
 		},
     }
@@ -41,13 +41,13 @@ fn main() {
         .route(GET, "/")
         .reg(|_req: &Request, res: &mut Response| {
             //println!("{:?}",req.get_header("Connection"));
-            res.write_string("hello from router", 200);
+            res.write_string("hello from router");
         });
 
     http_server
         .route(POST, "/post")
         .reg(|_req: &Request, res: &mut Response| {
-            res.write_string("hello from router", 200);
+            res.write_string("hello from router");
         });
 
     http_server
@@ -59,20 +59,20 @@ fn main() {
                 .unwrap();
             let mut vec = Vec::new();
             file.read_to_end(&mut vec).unwrap();
-            res.write_binary(vec, 200).chunked();
+            res.write_binary(vec).chunked();
         });
 
     http_server
         .route(GET, "/file")
         .reg(|_req: &Request, res: &mut Response| {
-            res.write_file(String::from("./upload/test.txt"), 200);
+            res.write_file(String::from("./upload/test.txt")).status(200);
         });
 
     http_server
         .route(GET, "/mp4")
         .reg(|_req: &Request, res: &mut Response| {
             //res.add_header("Content-type".to_string(), "video/mp4".to_string());
-            res.write_file(String::from("./upload/test.mp4"), 200)
+            res.write_file(String::from("./upload/test.mp4"))
                 .chunked()
                 .enable_range();
         });
@@ -80,7 +80,7 @@ fn main() {
     http_server
         .route([GET, HEAD], "/download")
         .reg(|_req: &Request, res: &mut Response| {
-            res.write_file(String::from("./upload/mysql.dmg"), 200)
+            res.write_file(String::from("./upload/mysql.dmg"))
                 .specify_file_name("mysql.dmg")
                 .enable_range()
                 .chunked();
@@ -90,7 +90,7 @@ fn main() {
         middlewares.clone(),
         |req: &Request, res: &mut Response| {
             let s = format!("hello from {}", req.get_url());
-            res.write_string(&s, 200);
+            res.write_string(&s);
         },
     );
 
@@ -100,22 +100,22 @@ fn main() {
             let m = req.get_params();
             match m {
                 Some(m) => {
-                    res.write_string(&format!("{:?}", m), 200);
+                    res.write_string(&format!("{:?}", m));
                 }
                 None => {
-                    res.write_string("{}", 200);
+                    res.write_string("{}");
                 }
             }
         });
     http_server.set_not_found(|_req: &Request, res: &mut Response| {
-        res.write_string("not found", 404);
+        res.write_string("not found").status(404);
     });
 
     http_server.route(GET, "/middle").reg_with_middlewares(
         middlewares,
         |_req: &Request, res: &mut Response| {
             println!("invoke router");
-            res.write_string("hello from router", 200);
+            res.write_string("hello from router");
         },
     );
 
