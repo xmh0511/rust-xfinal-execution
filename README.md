@@ -12,6 +12,16 @@ This is the beginning of the aim to write a safe web server framework by Rust. F
 3. Rust has a very convenient package manager: Cargo, which can make you feel free to use any third crate without being necessary to use CMake to manage these dependencies or even to write obscure rules that are ugly. 
 
 
+### Features that have been supported
+1. Register router.
+2. Register middleware.
+3. Query text-plain body, url-form data, and multiple-form data(include uploaded files).
+4. Chunked transfer
+5. Accept Range requests, which implies that rust-xfinal has supported to download file with the resume breakpoint.
+
+### Features that haven't been supported yet
+1. Cookie/Session
+2. View-engine
 
 ### Usage
 > 1. HTTP "hello, world"
@@ -51,6 +61,26 @@ fn main(){
    );
    http_server.run();
 }
+````
+
+> 3. Query information from Request
+````rust
+http_server.set_not_found(|req: &Request, res: &mut Response| {
+    let r:Option<&str> = req.get_query("id");
+    let host = req.get_header("Host");
+    let file = req.get_file("file");
+    res.write_string(format!("id:{}",r.unwrap()).as_str(), 200);
+});
+````
+> 4. Chunked transfer and/or Rangeable
+````rust
+http_server.set_not_found(|_req: &Request, res: &mut Response| {
+    // file: res.write_file("./upload/test.mp4",200).chunked().enable_range();
+   //string: res.write_string("abcdefg",200).chunked();
+  // res.write_string("abcdefg",200).enable_range();
+  // file: res.write_file("./upload/test.mp4",200).enable_range().chunked();
+  // No sequence requirement, whatever combination as you go.
+});
 ````
 
 
