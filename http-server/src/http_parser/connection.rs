@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::net::TcpStream;
 
+use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::rc::Rc;
 
 use std::io;
@@ -267,12 +268,14 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
                 BodyType::Memory(buffs) => {
                     self.res
                         .add_header(String::from("Content-length"), buffs.len().to_string());
+                    self.res.http_state = 200;
                 }
                 BodyType::File(path) => match std::fs::OpenOptions::new().read(true).open(path) {
                     Ok(file) => {
                         let file_size = file.metadata().unwrap().len();
                         self.res
                             .add_header(String::from("Content-length"), file_size.to_string());
+                        self.res.http_state = 200;
                     }
                     Err(_) => {
                         self.res.write_state(404);
@@ -283,7 +286,7 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
         } else {
             match self.res.get_request_header_value("Range") {
                 Some(v) => {
-                    self.res.range =  parse_range_content(v);
+                    self.res.range = parse_range_content(v);
                 }
                 None => {
                     self.res.range = ResponseRangeMeta::None;
@@ -293,7 +296,7 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
     }
 }
 
-fn parse_range_content(v: &str) -> ResponseRangeMeta{
+fn parse_range_content(v: &str) -> ResponseRangeMeta {
     match v.trim().split_once("=") {
         Some(v) => {
             let v = v.1;
@@ -302,8 +305,12 @@ fn parse_range_content(v: &str) -> ResponseRangeMeta{
                     let start;
                     let end;
                     if v.0 != "" {
-                        let r: u64 = v.0.parse().unwrap_or_else(|_| 0);
-                        if r == 0 {
+                        let mut exception = false;
+                        let r: u64 = v.0.parse().unwrap_or_else(|_| {
+                            exception = true;
+                            0
+                        });
+                        if r == 0 && exception == true {
                             start = None;
                         } else {
                             start = Some(r);
@@ -312,8 +319,12 @@ fn parse_range_content(v: &str) -> ResponseRangeMeta{
                         start = None;
                     }
                     if v.1 != "" {
-                        let r: u64 = v.1.parse().unwrap_or_else(|_| 0);
-                        if r == 0 {
+                        let mut exception = false;
+                        let r: u64 = v.1.parse().unwrap_or_else(|_| {
+                            exception = true;
+                            0
+                        });
+                        if r == 0 && exception == true {
                             end = None;
                         } else {
                             end = Some(r);
@@ -323,14 +334,10 @@ fn parse_range_content(v: &str) -> ResponseRangeMeta{
                     }
                     ResponseRangeMeta::Range(start, end)
                 }
-                None => {
-                    ResponseRangeMeta::Range(None, None)
-                }
+                None => ResponseRangeMeta::Range(None, None),
             }
         }
-        None => {
-            ResponseRangeMeta::Range(None, None)
-        }
+        None => ResponseRangeMeta::Range(None, None),
     }
 }
 
@@ -430,12 +437,12 @@ impl<'a> Response<'a> {
         }
     }
 
-    pub(super) fn take_body_buff(&mut self) -> io::Result<Vec<u8>> {
+    pub(super) fn take_body_buff(&mut self) -> io::Result<LayzyBuffers> {
+        let body_size = self.take_body_size()?;
         match self.range {
             ResponseRangeMeta::Range(start, end) => {
                 let mut beg_pos;
                 let end_pos;
-                let body_size = self.take_body_size()?;
                 let mut lack_beg = false;
                 if let Some(x) = start {
                     beg_pos = x;
@@ -445,20 +452,23 @@ impl<'a> Response<'a> {
                 }
                 if let Some(x) = end {
                     if lack_beg {
-                        end_pos = body_size  - 1;
+                        end_pos = body_size - 1;
                         beg_pos = body_size - x;
-                    }else{
+                    } else {
                         end_pos = x;
                     }
                 } else {
-                    if lack_beg{
+                    if lack_beg {
                         todo!()
                     }
                     end_pos = body_size - 1;
                 }
                 if beg_pos > end_pos || (beg_pos >= (body_size - 1)) || end_pos >= body_size {
                     self.write_state(416);
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "bad range values"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "bad range values",
+                    ));
                 }
 
                 let v = format!("bytes {}-{}/{}", beg_pos, end_pos, body_size);
@@ -467,44 +477,63 @@ impl<'a> Response<'a> {
                 let key = "Content-Length".to_string();
                 self.remove_header(key.clone());
 
-                if !self.chunked.enable{
+                if !self.chunked.enable {
                     self.add_header(key, len);
                 }
+                self.http_state = 206;
 
-                let mut ret_buff = Vec::new();
                 match &self.body {
                     BodyType::Memory(buffs) => {
-                        ret_buff.extend_from_slice(&buffs[beg_pos as usize..=end_pos as usize]);
-                        return Ok(ret_buff);
+                        let slice = &buffs[beg_pos as usize..=end_pos as usize];
+                        let mut ret_buff = Vec::new();
+                        ret_buff.extend_from_slice(slice);
+                        return Ok(LayzyBuffers {
+                            buffs: LayzyBuffersType::Memory(ret_buff),
+                            len: slice.len() as u64,
+                        });
                     }
                     BodyType::File(path) => {
                         let mut file = std::fs::OpenOptions::new().read(true).open(path)?;
                         let need_size = end_pos - beg_pos + 1;
-                        let len = ret_buff.len();
-                        ret_buff.resize(need_size as usize + len, b'\0');
                         file.seek(std::io::SeekFrom::Start(beg_pos))?;
-                        file.read(&mut ret_buff)?;
-                        return Ok(ret_buff);
+                        return Ok(LayzyBuffers {
+                            buffs: LayzyBuffersType::File(FileType {
+                                file: Box::new(file),
+                                buffs: Vec::new(),
+                            }),
+                            len: need_size,
+                        });
                     }
                     BodyType::None => {
-                        let buff =Vec::new();
-                        return Ok(buff);
+                        return Ok(LayzyBuffers {
+                            buffs: LayzyBuffersType::None,
+                            len: 0,
+                        });
                     }
                 };
             }
             ResponseRangeMeta::None => match &self.body {
                 BodyType::Memory(buffs) => {
-                    return Ok(buffs.clone());
+                    return Ok(LayzyBuffers {
+                        buffs: LayzyBuffersType::Memory(buffs.clone()),
+                        len: buffs.len() as u64,
+                    });
                 }
                 BodyType::File(path) => {
-                    let mut buff = Vec::new();
-                    let mut file = std::fs::OpenOptions::new().read(true).open(path)?;
-                    file.read_to_end(& mut buff)?;
-                    return Ok(buff);
+                    let file = std::fs::OpenOptions::new().read(true).open(path)?;
+                    return Ok(LayzyBuffers {
+                        buffs: LayzyBuffersType::File(FileType {
+                            file: Box::new(file),
+                            buffs: Vec::new(),
+                        }),
+                        len: body_size as u64,
+                    });
                 }
                 BodyType::None => {
-                    let buff = Vec::new();
-                    return Ok(buff);
+                    return Ok(LayzyBuffers {
+                        buffs: LayzyBuffersType::None,
+                        len: 0,
+                    });
                 }
             },
         }
@@ -569,4 +598,73 @@ pub struct MultipleFormFile {
 pub enum MultipleFormData<'a> {
     Text(&'a str),
     File(MultipleFormFile),
+}
+
+pub(super) struct FileType {
+    file: Box<std::fs::File>,
+    buffs: Vec<u8>,
+}
+
+pub(super) enum LayzyBuffersType {
+    Memory(Vec<u8>),
+    File(FileType),
+    None,
+}
+pub(super) struct LayzyBuffers {
+    buffs: LayzyBuffersType,
+    len: u64,
+}
+
+impl LayzyBuffers {
+    pub fn len(&self) -> usize {
+        self.len as usize
+    }
+}
+
+impl Index<Range<usize>> for LayzyBuffers {
+    type Output = [u8];
+
+    fn index(&self, _index: Range<usize>) -> &Self::Output {
+        unimplemented!()
+    }
+}
+
+impl IndexMut<Range<usize>> for LayzyBuffers {
+    fn index_mut(&mut self, index: Range<usize>) -> &mut Self::Output {
+        match &mut self.buffs {
+            LayzyBuffersType::Memory(buffs) => &mut buffs[index],
+            LayzyBuffersType::File(file_v) => {
+                let file = &mut file_v.file;
+                let need_size = index.end - index.start;
+                let buffs = &mut file_v.buffs;
+                buffs.resize(need_size, b'\0');
+                file.read(buffs).unwrap();
+                buffs
+            }
+            LayzyBuffersType::None => todo!(),
+        }
+    }
+}
+
+impl Deref for LayzyBuffers {
+    type Target = Vec<u8>;
+
+    fn deref(&self) -> &Self::Target {
+        unimplemented!()
+    }
+}
+
+impl DerefMut for LayzyBuffers {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match &mut self.buffs {
+            LayzyBuffersType::Memory(buffs) => buffs,
+            LayzyBuffersType::File(file_v) => {
+                let file = &mut file_v.file;
+                let buffs = &mut file_v.buffs;
+                file.read_to_end(buffs).unwrap();
+                buffs
+            }
+            LayzyBuffersType::None => todo!(),
+        }
+    }
 }

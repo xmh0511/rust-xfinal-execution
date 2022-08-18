@@ -35,7 +35,18 @@ fn main() {
     http_server
         .route(GET, "/file")
         .reg(|_req: &Request, res: &mut Response| {
-            res.write_file(String::from("./upload/test.txt"), 200);
+            res.write_file(String::from("./upload/test.txt"), 200)
+                .chunked()
+                .enable_range();
+        });
+
+    http_server
+        .route(GET, "/mp4")
+        .reg(|_req: &Request, res: &mut Response| {
+			res.add_header("Content-type".to_string(), "video/mp4".to_string());
+            res.write_file(String::from("./upload/test.mp4"), 200)
+                .chunked()
+                .enable_range();
         });
 
     http_server.set_not_found(|_req: &Request, res: &mut Response| {

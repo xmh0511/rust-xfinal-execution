@@ -126,7 +126,7 @@ fn construct_http_event(
         match write_once(*stream, &mut response) {
             Ok(_) => {}
             Err(e) => {
-                println!("write error:{}", e.to_string());
+                println!("write once error:{}", e.to_string());
                 return false;
             }
         }
@@ -135,7 +135,7 @@ fn construct_http_event(
         match write_chunk(*stream, &mut response) {
             Ok(_) => {}
             Err(e) => {
-                println!("write error:{}", e.to_string());
+                println!("write chunked error:{}", e.to_string());
                 return false;
             }
         }
@@ -287,16 +287,18 @@ fn write_once(stream: &mut TcpStream, response: &mut Response) -> io::Result<()>
         stream.flush()?;
         Ok(())
     } else {
-        let buffs = response.take_body_buff()?;
+        let mut lazy_buffs = response.take_body_buff()?;
         let s = response.header_to_string();
+		let buffs:& mut Vec<u8> = & mut lazy_buffs;
         stream.write(&s)?;
-        stream.write(&buffs)?;
+        stream.write(buffs)?;
         stream.flush()?;
         Ok(())
     }
 }
 
 fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()> {
+	let mut lazy_buffs = response.take_body_buff()?;  //修改内部状态更新header头
     let header = response.header_to_string();
     let _ = stream.write(&header)?;
     stream.flush()?;
@@ -305,16 +307,15 @@ fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()
     }
     let mut start = response.chunked.range.0;
     let chunked_size = response.chunked.range.1;
-    let body = response.take_body_buff()?;
     loop {
-        if start >= body.len() {
+        if start >= lazy_buffs.len() {
             break;
         }
         let mut end = start + chunked_size;
-        if end > body.len() {
-            end = body.len();
+        if end > lazy_buffs.len() {
+            end = lazy_buffs.len();
         }
-        let slice = &body[start..end];
+        let slice = & mut lazy_buffs[start..end];
         let size = end - start;
         let size = format!("{:X}", size);
         stream.write(size.as_bytes())?;
