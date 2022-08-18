@@ -578,7 +578,7 @@ impl<'a> Response<'a> {
                 let extension = std::path::Path::new(&path)
                     .extension()
                     .and_then(OsStr::to_str);
-				println!("extension:{:?}",extension);
+
                 match extension {
                     Some(extension) => {
                         let content_type = mime::extension_to_content_type(extension);
