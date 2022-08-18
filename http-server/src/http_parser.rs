@@ -1,14 +1,13 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
+use std::io::ErrorKind;
 use std::net::{Shutdown, TcpStream};
 
 use std::rc::Rc;
+use std::str::Utf8Error;
 use std::sync::Arc;
-use std::{
-    io,
-    io::{prelude::*, ErrorKind},
-};
+use std::{io, io::prelude::*};
 
 use uuid;
 
@@ -50,6 +49,30 @@ where
     }
 }
 
+trait UnifiedError {
+    fn to_string(&self) -> String;
+    fn kind(&self) -> ErrorKind;
+}
+
+impl UnifiedError for Utf8Error {
+    fn to_string(&self) -> String {
+        ToString::to_string(&self)
+    }
+
+    fn kind(&self) -> ErrorKind {
+        io::ErrorKind::InvalidData
+    }
+}
+
+impl UnifiedError for io::Error {
+    fn to_string(&self) -> String {
+        ToString::to_string(&self)
+    }
+    fn kind(&self) -> ErrorKind {
+        io::Error::kind(self)
+    }
+}
+
 #[derive(Clone)]
 pub struct ConnectionData {
     pub(super) router_map: RouterMap,
@@ -61,6 +84,7 @@ pub struct ServerConfig {
     pub(super) read_timeout: u32,
     pub(super) chunk_size: u32,
     pub(super) write_timeout: u32,
+    pub(super) open_log: bool,
 }
 
 enum HasBody {
@@ -127,7 +151,9 @@ fn construct_http_event(
         match write_once(*stream, &mut response) {
             Ok(_) => {}
             Err(e) => {
-                println!("write once error:{}", e.to_string());
+                if server_config.open_log {
+                    println!("write once error:{}", ToString::to_string(&e));
+                }
                 return false;
             }
         }
@@ -136,7 +162,9 @@ fn construct_http_event(
         match write_chunk(*stream, &mut response) {
             Ok(_) => {}
             Err(e) => {
-                println!("write chunked error:{}", e.to_string());
+                if server_config.open_log {
+                    println!("write chunked error:{}", ToString::to_string(&e));
+                }
                 return false;
             }
         }
@@ -176,9 +204,9 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
         let read_result = read_http_head(&mut stream);
         if let Ok((mut head_content, possible_body)) = read_result {
             let head_result = parse_header(&mut head_content);
-			//println!("{:#?}",head_result.as_ref().unwrap());
+            //println!("{:#?}",head_result.as_ref().unwrap());
             match head_result {
-                Some((method, url, version, map)) => {
+                Ok((method, url, version, map)) => {
                     let need_alive = is_keep_alive(&map);
                     match has_body(&map) {
                         HasBody::Len(size) => match possible_body {
@@ -258,23 +286,25 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                             }
                         }
                         HasBody::Bad => {
-                            println!("invalid http body content");
+                            if conn_data.server_config.open_log {
+                                println!("invalid http body content");
+                            }
                             let _ = stream.shutdown(Shutdown::Both);
                             break;
                         }
                     }
                 }
-                None => {
-                    println!("invalid http head content");
+                Err(e) => {
+                    if conn_data.server_config.open_log {
+                        println!("invalid http head content:{}",ToString::to_string(&e));
+                    }
                     let _ = stream.shutdown(Shutdown::Both);
                     break;
                 }
             }
-        } else if let Err(time_out) = read_result {
-            if !time_out {
-                println!("invalid http head text");
-            } else {
-                println!("read time out");
+        } else if let Err(e) = read_result {
+            if conn_data.server_config.open_log {
+                println!("error during reading header:{}", e.to_string());
             }
             let _ = stream.shutdown(Shutdown::Both);
             break;
@@ -346,7 +376,9 @@ fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()
     Ok(())
 }
 
-fn read_http_head(stream: &mut TcpStream) -> Result<(String, Option<Vec<u8>>), bool> {
+fn read_http_head(
+    stream: &mut TcpStream,
+) -> Result<(String, Option<Vec<u8>>), Box<dyn UnifiedError>> {
     let mut buff: [u8; 1024] = [b'\0'; 1024];
     let mut head_string: String = String::new();
     loop {
@@ -373,37 +405,29 @@ fn read_http_head(stream: &mut TcpStream) -> Result<(String, Option<Vec<u8>>), b
                                 }
                                 return Ok((head_string, None));
                             }
-                            Err(_) => {
-                                return Err(false);
+                            Err(e) => {
+                                return Err(Box::new(e));
                             }
                         }
                     }
                     None => match std::str::from_utf8(&buff) {
                         Ok(s) => head_string += s,
-                        Err(_) => {
-                            return Err(false);
+                        Err(e) => {
+                            return Err(Box::new(e));
                         }
                     },
                 }
             }
-            Err(e) => match e.kind() {
-                ErrorKind::TimedOut => {
-                    return Err(true);
-                }
-                ErrorKind::WouldBlock => {
-                    return Err(true);
-                }
-                _ => {
-                    return Err(false);
-                }
-            },
+            Err(e) => {
+                return Err(Box::new(e));
+            }
         }
     }
 }
 
 fn parse_header(
     head_content: &mut String,
-) -> Option<(&str, &str, &str, HashMap<&'_ str, &'_ str>)> {
+) -> io::Result<(&str, &str, &str, HashMap<&'_ str, &'_ str>)> {
     let mut head_map = HashMap::new();
     match head_content.find("\r\n") {
         Some(pos) => {
@@ -428,16 +452,22 @@ fn parse_header(
                         head_map.insert(key.trim(), value.trim());
                     }
                     None => {
-                        println!("invalid k/v pair in head");
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "invalid k/v pair in head",
+                        ));
                     }
                 }
                 //head_map.insert(String::from(pair[0]),pair[1]);
             }
             //println!("{:#?}", head_map);
             // method, url, version,header_pairs
-            Some((url_result[0], url_result[1], url_result[2], head_map))
+            Ok((url_result[0], url_result[1], url_result[2], head_map))
         }
-        None => None,
+        None => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid Header:No METHOD URL VERSION\\r\\n",
+        )),
     }
 }
 
@@ -586,7 +616,7 @@ fn read_body_according_to_type<'a>(
             Some((_, boundary)) => match boundary.trim().split_once("=") {
                 Some((_, boundary)) => {
                     let boundary = format!("--{}", boundary.trim());
-                    println!("boundary: {}", boundary);
+                    //println!("boundary: {}", boundary);
                     let end_boundary = format!("{}--", &boundary);
                     //println!("end boundary {}",end_boundary);
                     let r = read_multiple_form_body(
@@ -872,7 +902,7 @@ fn read_multiple_form_body<'a>(
                     state = 1;
                     continue 'Outer;
                 } else {
-                    let e = io::Error::new(io::ErrorKind::InvalidData, "bad body");
+                    let e = io::Error::new(ErrorKind::InvalidData, "bad body");
                     return io::Result::Err(e);
                 }
             }
@@ -1174,16 +1204,16 @@ fn read_multiple_form_body<'a>(
                         .insert(name.0, MultipleFormData::Text(&r.1[0..text_len - 2]));
                     //处理文本时, 包含了分隔符的\r\n，在这里去除
                 }
-                println!("{:#?}", multiple_data_collection);
+                //println!("{:#?}", multiple_data_collection);
                 return io::Result::Ok(multiple_data_collection);
             }
             Err(_) => {
-                let e = io::Error::new(io::ErrorKind::InvalidData, "bad body with invalid utf8");
+                let e = io::Error::new(ErrorKind::InvalidData, "bad body with invalid utf8");
                 return io::Result::Err(e);
             }
         },
         Err(_) => {
-            let e = io::Error::new(io::ErrorKind::InvalidData, "bad body with invalid utf8");
+            let e = io::Error::new(ErrorKind::InvalidData, "bad body with invalid utf8");
             return io::Result::Err(e);
         }
     }

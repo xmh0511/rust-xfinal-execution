@@ -7,7 +7,8 @@ use http_server::{
 fn main() {
     let mut http_server = HttpServer::create(end_point!(0.0.0.0:8080), 10);
 
-    http_server.set_write_timeout(5 * 60 * 1000);
+    http_server.set_write_timeout(2 * 60 * 1000);
+	http_server.open_server_log(true);
 
     http_server
         .route(GET, "/")

@@ -114,6 +114,7 @@ impl HttpServer {
                 read_timeout: 5 * 1000,
                 chunk_size: 1024 * 5,
                 write_timeout: 5 * 1000,
+				open_log:false
             },
         }
     }
@@ -134,6 +135,10 @@ impl HttpServer {
     pub fn set_chunksize(&mut self, size: u32) {
         self.config_.chunk_size = size;
     }
+
+	pub fn open_server_log(&mut self, open:bool){
+		self.config_.open_log = open;
+	}
 
     pub fn run(&mut self) {
         let [a, b, c, d] = self.end_point.ip_address;
