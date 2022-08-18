@@ -266,7 +266,6 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
             self.res.header_pair.remove(&key);
         }
         self.res.chunked.enable = true;
-        self.res.chunked.range.0 = 0;
         self
     }
 
@@ -351,17 +350,16 @@ fn parse_range_content(v: &str) -> ResponseRangeMeta {
     }
 }
 
-pub struct ChunkRange(pub(super) usize, pub(super) usize);
 pub struct ResponseChunkMeta {
     pub(super) enable: bool,
-    pub(super) range: ChunkRange,
+    pub(super) chunk_size: usize,
 }
 
 impl ResponseChunkMeta {
     pub(super) fn new(chunk_size: u32) -> Self {
         ResponseChunkMeta {
             enable: false,
-            range: ChunkRange(0, chunk_size as usize),
+            chunk_size: chunk_size as usize,
         }
     }
 }

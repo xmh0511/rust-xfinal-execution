@@ -35,9 +35,7 @@ fn main() {
     http_server
         .route(GET, "/file")
         .reg(|_req: &Request, res: &mut Response| {
-            res.write_file(String::from("./upload/test.txt"), 200)
-                .chunked()
-                .enable_range();
+            res.write_file(String::from("./upload/test.txt"), 200);
         });
 
     http_server

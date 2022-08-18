@@ -19,27 +19,27 @@ pub use http_parser::connection::http_response_table::{
 
 use http_parser::connection::http_response_table::get_httpmethod_from_code;
 
-pub trait SerializationMethods{
-	fn serialize(&self) -> Vec<&'static str>;
+pub trait SerializationMethods {
+    fn serialize(&self) -> Vec<&'static str>;
 }
 
-impl SerializationMethods for u8{
+impl SerializationMethods for u8 {
     fn serialize(&self) -> Vec<&'static str> {
-		let m = get_httpmethod_from_code(*self);
-		let mut r = Vec::new();
-		r.push(m);
-		r
+        let m = get_httpmethod_from_code(*self);
+        let mut r = Vec::new();
+        r.push(m);
+        r
     }
 }
 
-impl SerializationMethods for &[u8]{
+impl SerializationMethods for &[u8] {
     fn serialize(&self) -> Vec<&'static str> {
-		let mut r = Vec::new();
-		for e in *self{
-			let m = get_httpmethod_from_code(*e);
-			r.push(m);
-		}
-		r
+        let mut r = Vec::new();
+        for e in *self {
+            let m = get_httpmethod_from_code(*e);
+            r.push(m);
+        }
+        r
     }
 }
 
@@ -65,12 +65,14 @@ pub struct RouterRegister<'a> {
 impl<'a> RouterRegister<'a> {
     pub fn reg<F>(&mut self, f: F)
     where
-        F: Router + Send + Sync + 'static+ Clone,
+        F: Router + Send + Sync + 'static + Clone,
     {
-		for e in &self.methods{
-			let router_path = format!("{}{}", e, self.path);
-			self.server.router.insert(router_path, (None, Arc::new(f.clone())));
-		}
+        for e in &self.methods {
+            let router_path = format!("{}{}", e, self.path);
+            self.server
+                .router
+                .insert(router_path, (None, Arc::new(f.clone())));
+        }
     }
 
     pub fn reg_with_middlewares<F>(
@@ -80,12 +82,13 @@ impl<'a> RouterRegister<'a> {
     ) where
         F: Router + Send + Sync + 'static + Clone,
     {
-		for e in &self.methods{
-			let router_path = format!("{}{}", e, self.path);
-			self.server
-				.router
-				.insert(router_path, (Some(middlewares.clone()), Arc::new(f.clone())));
-		}
+        for e in &self.methods {
+            let router_path = format!("{}{}", e, self.path);
+            self.server.router.insert(
+                router_path,
+                (Some(middlewares.clone()), Arc::new(f.clone())),
+            );
+        }
     }
 }
 
@@ -98,7 +101,7 @@ impl HttpServer {
             config_: ServerConfig {
                 upload_directory: String::from("./upload"),
                 read_timeout: 5 * 1000,
-				chunk_size: 1024
+                chunk_size: 1024 * 5,
             },
         }
     }
@@ -112,9 +115,9 @@ impl HttpServer {
         self.config_.read_timeout = millis;
     }
 
-	pub fn set_chunksize(&mut self, size:u32){
-		self.config_.chunk_size = size;
-	}
+    pub fn set_chunksize(&mut self, size: u32) {
+        self.config_.chunk_size = size;
+    }
 
     pub fn run(&mut self) {
         let [a, b, c, d] = self.end_point.ip_address;
@@ -126,8 +129,8 @@ impl HttpServer {
             Err(e) => match e.kind() {
                 io::ErrorKind::AlreadyExists => {}
                 _ => {
-					panic!("{}",e.to_string())
-				}
+                    panic!("{}", e.to_string())
+                }
             },
         };
         let safe_router = Arc::new(self.router.clone());
@@ -158,7 +161,11 @@ impl HttpServer {
         }
     }
 
-    pub fn route<'a, T:SerializationMethods>(&'a mut self,methods:T, path: &'a str) -> RouterRegister<'_> {
+    pub fn route<'a, T: SerializationMethods>(
+        &'a mut self,
+        methods: T,
+        path: &'a str,
+    ) -> RouterRegister<'_> {
         //let method = get_httpmethod_from_code(M);
         RouterRegister {
             server: self,
