@@ -176,6 +176,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
         let read_result = read_http_head(&mut stream);
         if let Ok((mut head_content, possible_body)) = read_result {
             let head_result = parse_header(&mut head_content);
+			//println!("{:#?}",head_result.as_ref().unwrap());
             match head_result {
                 Some((method, url, version, map)) => {
                     let need_alive = is_keep_alive(&map);

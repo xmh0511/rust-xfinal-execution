@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use http_server::{
-    end_point, inject_middlewares, EndPoint, HttpServer, MiddleWare, Request, Response, GET, POST,
+    end_point, inject_middlewares, EndPoint, HttpServer, MiddleWare, Request, Response, GET, POST, HEAD,
 };
 
 fn main() {
@@ -49,8 +49,9 @@ fn main() {
                 .enable_range();
         });
 
+
     http_server
-        .route(GET, "/download")
+        .route([GET,HEAD], "/download")
         .reg(|_req: &Request, res: &mut Response| {
             res.write_file(String::from("./upload/mysql.dmg"), 200)
                 .specify_file_name("mysql.dmg")

@@ -43,6 +43,17 @@ impl SerializationMethods for &[u8] {
     }
 }
 
+impl<const I:usize> SerializationMethods for [u8;I]{
+    fn serialize(&self) -> Vec<&'static str> {
+		let mut r = Vec::new();
+		for e in *self {
+            let m = get_httpmethod_from_code(e);
+            r.push(m);
+        }
+        r
+    }
+}
+
 #[derive(Debug)]
 pub struct EndPoint {
     pub port: u16,
