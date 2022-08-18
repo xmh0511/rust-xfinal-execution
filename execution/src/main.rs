@@ -5,11 +5,37 @@ use http_server::{
     POST,
 };
 
+fn interrupt_one(req: &Request, res: &mut Response) -> bool {
+    println!("invoke middleware2");
+    match req.get_param("id") {
+        Some(v) => {
+			if v == "1"{
+				true
+			}else{
+				res.write_string("invalid request, invalid id value", 400);
+				false
+			}
+		},
+        None => {
+			res.write_string("invalid request, no id", 400);
+			false
+		},
+    }
+}
+
 fn main() {
     let mut http_server = HttpServer::create(end_point!(0.0.0.0:8080), 10);
 
     http_server.set_write_timeout(2 * 60 * 1000);
     http_server.open_server_log(false);
+
+    let middlewares = inject_middlewares! {
+        |_req:& Request,_res:&mut Response|->bool{
+            println!("invoke middleware1");
+            true
+        },
+        interrupt_one
+    };
 
     http_server
         .route(GET, "/")
@@ -60,12 +86,13 @@ fn main() {
                 .chunked();
         });
 
-    http_server
-        .route(GET, "/wildcard/*")
-        .reg(|req: &Request, res: &mut Response| {
+    http_server.route(GET, "/wildcard/*").reg_with_middlewares(
+        middlewares.clone(),
+        |req: &Request, res: &mut Response| {
             let s = format!("hello from {}", req.get_url());
             res.write_string(&s, 200);
-        });
+        },
+    );
 
     http_server
         .route(GET, "/param")
@@ -73,27 +100,16 @@ fn main() {
             let m = req.get_params();
             match m {
                 Some(m) => {
-					res.write_string(&format!("{:?}",m),200);
-				},
+                    res.write_string(&format!("{:?}", m), 200);
+                }
                 None => {
-					res.write_string("{}", 200);
-				},
+                    res.write_string("{}", 200);
+                }
             }
-    });
+        });
     http_server.set_not_found(|_req: &Request, res: &mut Response| {
         res.write_string("not found", 404);
     });
-
-    let middlewares = inject_middlewares! {
-        |_req:& Request,_res:&mut Response|->bool{
-            println!("invoke middleware1");
-            true
-        },
-        |_req:& Request,_res:&mut Response|->bool{
-            println!("invoke middleware2");
-            true
-        }
-    };
 
     http_server.route(GET, "/middle").reg_with_middlewares(
         middlewares,

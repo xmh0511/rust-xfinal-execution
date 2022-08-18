@@ -49,6 +49,7 @@ where
     }
 }
 
+
 trait UnifiedError {
     fn to_string(&self) -> String;
     fn kind(&self) -> ErrorKind;
@@ -498,12 +499,8 @@ fn invoke_router(result: &RouterValue, req: &Request, res: &mut Response) {
 fn do_router(router: &RouterMap, req: &Request, res: &mut Response) {
     let url = req.url.split_once("?");
     let url = match url {
-        Some((url,_)) => {
-			url
-		},
-        None => {
-			req.url
-		},
+        Some((url, _)) => url,
+        None => req.url,
     };
     let key = format!("{}{}", req.method, url);
     //println!("{key}");
@@ -532,7 +529,7 @@ fn do_router(router: &RouterMap, req: &Request, res: &mut Response) {
             match r {
                 Some(k) => {
                     let wild_router = router.get(k).unwrap();
-                    wild_router.1.call(req, res);
+                    invoke_router(wild_router, req, res);
                 }
                 None => {
                     let not_found = router.get("NEVER_FOUND_FOR_ALL").unwrap();
