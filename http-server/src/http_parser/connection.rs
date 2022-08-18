@@ -416,6 +416,7 @@ impl<'a> Response<'a> {
     }
 
     pub(super) fn header_to_string(&self) -> Vec<u8> {
+		//println!("header pairs: {:#?}",self.header_pair);
         let mut buffs = Vec::new();
         let state_text = http_response_table::get_httpstatus_from_code(self.http_state);
         buffs.extend_from_slice(format!("{} {}", self.version, state_text).as_bytes());
