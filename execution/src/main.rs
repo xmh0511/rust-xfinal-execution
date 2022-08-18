@@ -7,6 +7,8 @@ use http_server::{
 fn main() {
     let mut http_server = HttpServer::create(end_point!(0.0.0.0:8080), 10);
 
+    http_server.set_write_timeout(5 * 60 * 1000);
+
     http_server
         .route(GET, "/")
         .reg(|_req: &Request, res: &mut Response| {
@@ -41,9 +43,19 @@ fn main() {
     http_server
         .route(GET, "/mp4")
         .reg(|_req: &Request, res: &mut Response| {
-			//res.add_header("Content-type".to_string(), "video/mp4".to_string());
+            //res.add_header("Content-type".to_string(), "video/mp4".to_string());
             res.write_file(String::from("./upload/test.mp4"), 200)
-            .chunked().enable_range();
+                .chunked()
+                .enable_range();
+        });
+
+    http_server
+        .route(GET, "/download")
+        .reg(|_req: &Request, res: &mut Response| {
+            res.write_file(String::from("./upload/mysql.dmg"), 200)
+                .specify_file_name("mysql.dmg")
+                .enable_range()
+                .chunked();
         });
 
     http_server.set_not_found(|_req: &Request, res: &mut Response| {

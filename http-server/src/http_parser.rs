@@ -60,6 +60,7 @@ pub struct ServerConfig {
     pub(super) upload_directory: String,
     pub(super) read_timeout: u32,
     pub(super) chunk_size: u32,
+    pub(super) write_timeout: u32,
 }
 
 enum HasBody {
@@ -167,6 +168,9 @@ fn is_keep_alive(head_map: &HashMap<&str, &str>) -> bool {
 pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)) {
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(
         conn_data.server_config.read_timeout as u64,
+    )));
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(
+        conn_data.server_config.write_timeout as u64,
     )));
     'Back: loop {
         let read_result = read_http_head(&mut stream);

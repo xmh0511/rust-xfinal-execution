@@ -102,6 +102,7 @@ impl HttpServer {
                 upload_directory: String::from("./upload"),
                 read_timeout: 5 * 1000,
                 chunk_size: 1024 * 5,
+                write_timeout: 5 * 1000,
             },
         }
     }
@@ -113,6 +114,10 @@ impl HttpServer {
 
     pub fn set_read_timeout(&mut self, millis: u32) {
         self.config_.read_timeout = millis;
+    }
+
+	pub fn set_write_timeout(&mut self, millis: u32) {
+        self.config_.write_timeout = millis;
     }
 
     pub fn set_chunksize(&mut self, size: u32) {

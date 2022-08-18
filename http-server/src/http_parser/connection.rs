@@ -233,12 +233,12 @@ impl<'a> Request<'a> {
         Rc::clone(&self.conn_)
     }
 
-	pub fn get_method(&self)->&str{
-		self.method
-	}
-	pub fn get_url(&self)->&str{
-		self.url
-	}
+    pub fn get_method(&self) -> &str {
+        self.method
+    }
+    pub fn get_url(&self) -> &str {
+        self.url
+    }
 }
 
 pub struct ResponseConfig<'b, 'a> {
@@ -269,7 +269,23 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
         self
     }
 
-    pub fn enable_range(&mut self) {
+    pub fn specify_file_name(&mut self, name: &str) -> &mut Self {
+        match &self.res.body {
+            BodyType::Memory(_) => {}
+            BodyType::File(_) => {
+                if !self.res.header_exist("Content-Disposition") {
+                    self.res.add_header(
+                        "Content-Disposition".to_string(),
+                        format!("attachment; filename=\"{name}\""),
+                    );
+                }
+            }
+            BodyType::None => todo!(),
+        }
+        self
+    }
+
+    pub fn enable_range(&mut self) -> &mut Self {
         if self.res.method == "HEAD" {
             self.res
                 .add_header(String::from("Accept-Ranges"), String::from("bytes"));
@@ -302,6 +318,7 @@ impl<'b, 'a> ResponseConfig<'b, 'a> {
                 }
             }
         }
+        self
     }
 }
 
@@ -429,7 +446,7 @@ impl<'a> Response<'a> {
         let state_text = http_response_table::get_httpstatus_from_code(self.http_state);
         buffs.extend_from_slice(format!("{} {}", self.version, state_text).as_bytes());
         for (k, v) in &self.header_pair {
-            buffs.extend_from_slice(format!("{}:{}\r\n", k, v).as_bytes());
+            buffs.extend_from_slice(format!("{}: {}\r\n", k, v).as_bytes());
         }
         buffs.extend_from_slice(b"\r\n");
         buffs
@@ -588,9 +605,12 @@ impl<'a> Response<'a> {
                     Some(extension) => {
                         let content_type = mime::extension_to_content_type(extension);
                         if content_type != "" {
-							if !self.header_exist("Content-Type"){
-								self.add_header(String::from("Content-Type"), content_type.to_string());
-							}
+                            if !self.header_exist("Content-Type") {
+                                self.add_header(
+                                    String::from("Content-Type"),
+                                    content_type.to_string(),
+                                );
+                            }
                         }
                     }
                     None => {}
