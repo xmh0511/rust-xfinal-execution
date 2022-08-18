@@ -1,14 +1,15 @@
 use std::io::Read;
 
 use http_server::{
-    end_point, inject_middlewares, EndPoint, HttpServer, MiddleWare, Request, Response, GET, POST, HEAD,
+    end_point, inject_middlewares, EndPoint, HttpServer, MiddleWare, Request, Response, GET, HEAD,
+    POST,
 };
 
 fn main() {
     let mut http_server = HttpServer::create(end_point!(0.0.0.0:8080), 10);
 
     http_server.set_write_timeout(2 * 60 * 1000);
-	http_server.open_server_log(true);
+    http_server.open_server_log(true);
 
     http_server
         .route(GET, "/")
@@ -50,14 +51,20 @@ fn main() {
                 .enable_range();
         });
 
-
     http_server
-        .route([GET,HEAD], "/download")
+        .route([GET, HEAD], "/download")
         .reg(|_req: &Request, res: &mut Response| {
             res.write_file(String::from("./upload/mysql.dmg"), 200)
                 .specify_file_name("mysql.dmg")
                 .enable_range()
                 .chunked();
+        });
+
+    http_server
+        .route(GET, "/wildcard/*")
+        .reg(|req: &Request, res: &mut Response| {
+			let s = format!("hello from {}",req.get_url());
+            res.write_string(&s, 200);
         });
 
     http_server.set_not_found(|_req: &Request, res: &mut Response| {

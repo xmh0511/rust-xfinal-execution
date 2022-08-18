@@ -296,7 +296,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                 }
                 Err(e) => {
                     if conn_data.server_config.open_log {
-                        println!("invalid http head content:{}",ToString::to_string(&e));
+                        println!("invalid http head content:{}", ToString::to_string(&e));
                     }
                     let _ = stream.shutdown(Shutdown::Both);
                     break;
@@ -495,24 +495,50 @@ fn invoke_router(result: &RouterValue, req: &Request, res: &mut Response) {
 }
 
 fn do_router(router: &RouterMap, req: &Request, res: &mut Response) {
-    let mut key = format!("{}{}", req.method, req.url);
+    let key = format!("{}{}", req.method, req.url);
+    //println!("{key}");
     match router.get(&key) {
         Some(result) => {
             invoke_router(result, req, res);
         }
         None => {
             // may be wildcard
-            key += "/*";
-            match router.get(&key) {
-                Some(result) => {
-                    invoke_router(result, req, res);
+            let r = router.keys().find(|&k| -> bool {
+                let last = k.len() - 1;
+                if &k[last..] == "*" {
+                    if key.len() > last - 1 {
+                        if &k[..last - 1] == &key[..last - 1] {
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            });
+            match r {
+                Some(k) => {
+                    let wild_router = router.get(k).unwrap();
+                    wild_router.1.call(req, res);
                 }
                 None => {
-                    // actually have not this router
                     let not_found = router.get("NEVER_FOUND_FOR_ALL").unwrap();
                     not_found.1.call(req, res);
                 }
             }
+            // match router.get(&key) {
+            //     Some(result) => {
+            //         invoke_router(result, req, res);
+            //     }
+            //     None => {
+            //         // actually have not this router
+            //         let not_found = router.get("NEVER_FOUND_FOR_ALL").unwrap();
+            //         not_found.1.call(req, res);
+            //     }
+            // }
         }
     }
 }
