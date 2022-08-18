@@ -69,7 +69,12 @@ http_server.set_not_found(|req: &Request, res: &mut Response| {
     let r:Option<&str> = req.get_query("id");
     let host = req.get_header("Host");
     let file = req.get_file("file");
-    res.write_string(format!("id:{}",r.unwrap()).as_str(), 200);
+    let version = req.get_version();
+    let method = req.get_method();
+    let headers = req.get_headers();
+    let forms = req.get_queries();
+    let get_all_files = req.get_files();
+    res.write_string("ok", 200);
 });
 ````
 > 4. Chunked transfer and/or Rangeable
