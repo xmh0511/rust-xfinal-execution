@@ -74,6 +74,7 @@ http_server.set_not_found(|req: &Request, res: &mut Response| {
     let headers = req.get_headers();
     let forms = req.get_queries();
     let get_all_files = req.get_files();
+    let url = req.get_url();
     res.write_string("ok", 200);
 });
 ````
