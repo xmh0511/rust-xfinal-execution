@@ -232,6 +232,10 @@ impl<'a> Request<'a> {
     pub fn get_conn(&self) -> Rc<RefCell<&'a mut TcpStream>> {
         Rc::clone(&self.conn_)
     }
+
+	pub fn get_method(&self)->&str{
+		self.method
+	}
 }
 
 pub struct ResponseConfig<'b, 'a> {
