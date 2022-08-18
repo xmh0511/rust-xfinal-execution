@@ -236,6 +236,9 @@ impl<'a> Request<'a> {
 	pub fn get_method(&self)->&str{
 		self.method
 	}
+	pub fn get_url(&self)->&str{
+		self.url
+	}
 }
 
 pub struct ResponseConfig<'b, 'a> {
