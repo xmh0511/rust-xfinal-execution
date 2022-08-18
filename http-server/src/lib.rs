@@ -189,7 +189,7 @@ impl HttpServer {
     ) -> RouterRegister<'_> {
         //let method = get_httpmethod_from_code(M);
 		if path.trim() == "/*"{
-			panic!("wildcard root path is not permitted!")
+			panic!("/* => wildcard of root path is not permitted!")
 		}
         RouterRegister {
             server: self,

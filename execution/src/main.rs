@@ -9,7 +9,7 @@ fn main() {
     let mut http_server = HttpServer::create(end_point!(0.0.0.0:8080), 10);
 
     http_server.set_write_timeout(2 * 60 * 1000);
-    http_server.open_server_log(true);
+    http_server.open_server_log(false);
 
     http_server
         .route(GET, "/")
@@ -63,10 +63,23 @@ fn main() {
     http_server
         .route(GET, "/wildcard/*")
         .reg(|req: &Request, res: &mut Response| {
-			let s = format!("hello from {}",req.get_url());
+            let s = format!("hello from {}", req.get_url());
             res.write_string(&s, 200);
         });
 
+    http_server
+        .route(GET, "/param")
+        .reg(|req: &Request, res: &mut Response| {
+            let m = req.get_params();
+            match m {
+                Some(m) => {
+					res.write_string(&format!("{:?}",m),200);
+				},
+                None => {
+					res.write_string("{}", 200);
+				},
+            }
+    });
     http_server.set_not_found(|_req: &Request, res: &mut Response| {
         res.write_string("not found", 404);
     });

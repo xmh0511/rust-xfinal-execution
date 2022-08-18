@@ -97,6 +97,49 @@ impl<'a> Request<'a> {
             }
         }
     }
+    pub fn get_param(&self, k: &str) -> Option<&str> {
+        match self.url.split_once("?") {
+            Some((_, v)) => {
+                let r = v.split("&");
+                for e in r {
+                    match e.split_once("=") {
+                        Some((ik, iv)) => {
+                            if ik == k {
+                                return Some(iv);
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                None
+            }
+            None => None,
+        }
+    }
+
+    pub fn get_params(&self)->Option<HashMap<&str,&str>> {
+        match self.url.split_once("?") {
+            Some((_, v)) => {
+                let r = v.split("&");
+				let mut map = HashMap::new();
+                for e in r {
+                    match e.split_once("=") {
+                        Some((ik, iv)) => {
+							map.insert(ik, iv);
+                        }
+                        None => {}
+                    }
+                }
+                if map.len() == 0{
+					None
+				}else{
+					Some(map)
+				}
+            }
+            None => None,
+        }
+    }
+
     pub fn get_headers(&self) -> HashMap<&str, &str> {
         self.header_pair.clone()
     }
@@ -396,6 +439,7 @@ pub struct Response<'a> {
     pub(super) header_pair: HashMap<String, String>,
     pub(super) version: &'a str,
     pub(super) method: &'a str,
+    //pub(super) url: &'a str,
     pub(super) http_state: u16,
     pub(super) body: BodyType,
     pub(super) chunked: ResponseChunkMeta,
@@ -617,7 +661,7 @@ impl<'a> Response<'a> {
                 }
             }
             Err(_) => {
-                self.write_string(&format!("{} not found", path), 404);
+                self.write_string(&format!("{} file not found", path), 404);
                 return ResponseConfig { res: self };
             }
         }

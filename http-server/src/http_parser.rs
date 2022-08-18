@@ -135,6 +135,7 @@ fn construct_http_event(
         header_pair: HashMap::new(),
         version,
         method,
+        //url,
         http_state: 200,
         body: BodyType::None,
         chunked: ResponseChunkMeta::new(server_config.chunk_size),
@@ -495,7 +496,16 @@ fn invoke_router(result: &RouterValue, req: &Request, res: &mut Response) {
 }
 
 fn do_router(router: &RouterMap, req: &Request, res: &mut Response) {
-    let key = format!("{}{}", req.method, req.url);
+    let url = req.url.split_once("?");
+    let url = match url {
+        Some((url,_)) => {
+			url
+		},
+        None => {
+			req.url
+		},
+    };
+    let key = format!("{}{}", req.method, url);
     //println!("{key}");
     match router.get(&key) {
         Some(result) => {
