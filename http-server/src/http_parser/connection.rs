@@ -6,8 +6,11 @@ use std::net::TcpStream;
 use std::ops::{Deref, DerefMut, Index, IndexMut, Range};
 use std::rc::Rc;
 
+use std::ffi::OsStr;
 use std::io;
 use std::io::prelude::*;
+
+pub mod mime;
 
 pub mod http_response_table {
     const STATE_TABLE: [(u16, &str); 20] = [
@@ -416,7 +419,7 @@ impl<'a> Response<'a> {
     }
 
     pub(super) fn header_to_string(&self) -> Vec<u8> {
-		//println!("header pairs: {:#?}",self.header_pair);
+        //println!("header pairs: {:#?}",self.header_pair);
         let mut buffs = Vec::new();
         let state_text = http_response_table::get_httpstatus_from_code(self.http_state);
         buffs.extend_from_slice(format!("{} {}", self.version, state_text).as_bytes());
@@ -540,6 +543,16 @@ impl<'a> Response<'a> {
         }
     }
 
+    pub fn header_exist(&self, s: &str) -> bool {
+        let r = self
+            .header_pair
+            .keys()
+            .find(|&k| if k == s { true } else { false });
+        match r {
+            Some(_) => true,
+            None => false,
+        }
+    }
     pub fn write_string(&mut self, v: &str, code: u16) -> ResponseConfig<'_, 'a> {
         self.write_binary(v.into(), code)
     }
@@ -562,6 +575,21 @@ impl<'a> Response<'a> {
             Ok(file) => {
                 let len = file.metadata().unwrap().len();
                 self.add_header(String::from("Content-length"), len.to_string());
+                let extension = std::path::Path::new(&path)
+                    .extension()
+                    .and_then(OsStr::to_str);
+				println!("extension:{:?}",extension);
+                match extension {
+                    Some(extension) => {
+                        let content_type = mime::extension_to_content_type(extension);
+                        if content_type != "" {
+							if !self.header_exist("Content-Type"){
+								self.add_header(String::from("Content-Type"), content_type.to_string());
+							}
+                        }
+                    }
+                    None => {}
+                }
             }
             Err(_) => {
                 self.write_string(&format!("{} not found", path), 404);
