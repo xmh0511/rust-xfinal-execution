@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::mpsc::{self, SendError};
 use std::thread;
 
 
@@ -42,7 +42,7 @@ impl<T:'static + Send,> ThreadPool<T> {
         r
     }
 
-    pub(super) fn poll(&mut self, data: T) {
+    pub(super) fn poll(&mut self, data: T)->Result<(),SendError<T>> {
         if self.index >= self.max {
             self.index = 0;
         }
@@ -51,12 +51,15 @@ impl<T:'static + Send,> ThreadPool<T> {
             match task.sender.send(data){
                 Ok(_) => {
 					self.index += 1;
+                    return Ok(());
 				},
                 Err(e) => {
-                  println!("dispatch stream error:{}",e.to_string());
+                  //println!("dispatch stream error:{}",e.to_string());
+                  return Err(e)
 				},
             }
         }
+        Ok(())
     }
 
     pub(super) fn join(self) {

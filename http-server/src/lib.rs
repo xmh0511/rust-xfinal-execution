@@ -167,10 +167,19 @@ impl HttpServer {
                     match conn {
                         Ok(stream) => {
                             let conn_data = conn_data.clone();
-                            pool.poll((conn_data, stream));
+                            match pool.poll((conn_data, stream)){
+                                Ok(_) => {},
+                                Err(e) => {
+                                    if self.config_.open_log{
+                                        println!("Send Connection Error: {}",e.to_string());
+                                    }
+                                },
+                            }
                         }
                         Err(e) => {
-                            println!("on connection error:{}", e.to_string());
+                            if self.config_.open_log{
+                                println!("on connection error:{}", e.to_string());
+                            }
                         }
                     }
                 }
