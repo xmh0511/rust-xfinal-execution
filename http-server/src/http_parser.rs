@@ -49,7 +49,6 @@ where
     }
 }
 
-
 trait UnifiedError {
     fn to_string(&self) -> String;
     fn kind(&self) -> ErrorKind;
@@ -381,42 +380,44 @@ fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()
 fn read_http_head(
     stream: &mut TcpStream,
 ) -> Result<(String, Option<Vec<u8>>), Box<dyn UnifiedError>> {
-    let mut buff: [u8; 1024] = [b'\0'; 1024];
-    let mut head_string: String = String::new();
+    let mut read_buffs = Vec::new();
+    let mut total_read_size = 0;
+    let head_end = b"\r\n\r\n";
     loop {
+        let mut buff: [u8; 1024] = [b'\0'; 1024];
         match stream.read(&mut buff) {
             Ok(read_size) => {
-                let head_end = b"\r\n\r\n";
-                let r = buff
+                total_read_size += read_size;
+                read_buffs.extend_from_slice(&buff[..read_size]);
+                let r = read_buffs
                     .windows(head_end.len())
-                    .position(|window| window == head_end);
+                    .position(|v| v == head_end);
                 match r {
                     Some(pos) => {
                         // at least have read out complete head
                         //println!("content:{:?}", buff);
                         match std::str::from_utf8(&buff[..pos]) {
                             Ok(s) => {
-                                head_string += s;
                                 let crlf_end = pos + 4;
-                                if read_size > crlf_end {
+                                if total_read_size > crlf_end {
                                     // touch the body
-                                    let r = &buff[crlf_end..read_size];
-                                    //println!("{:?}\n{}",r,std::str::from_utf8(r).unwrap());
-                                    let c: Vec<u8> = r.iter().map(|e| *e).collect();
-                                    return Ok((head_string, Some(c)));
+                                    let mut body_buffs = Vec::new();
+                                    body_buffs.extend_from_slice(&read_buffs[crlf_end..]);
+                                    return Ok((s.to_string(), Some(body_buffs)));
                                 }
-                                return Ok((head_string, None));
+                                return Ok((s.to_string(), None));
                             }
                             Err(e) => {
                                 return Err(Box::new(e));
                             }
                         }
                     }
-                    None => match std::str::from_utf8(&buff) {
-                        Ok(s) => head_string += s,
-                        Err(e) => {
+                    None => {
+                        if total_read_size > 3*1000*1024{
+                            let e = io::Error::new(io::ErrorKind::InvalidData,"header too large");
                             return Err(Box::new(e));
                         }
+                        continue;
                     },
                 }
             }
