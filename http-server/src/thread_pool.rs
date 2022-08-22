@@ -1,7 +1,6 @@
 use std::sync::mpsc::{self, SendError};
 use std::thread;
 
-
 struct MyTask<T> {
     sender: mpsc::Sender<T>,
     task: thread::JoinHandle<()>,
@@ -11,7 +10,7 @@ pub struct ThreadPool<T> {
     index: u16,
     max: u16,
 }
-impl<T:'static + Send,> ThreadPool<T> {
+impl<T: 'static + Send> ThreadPool<T> {
     pub(super) fn new<F: FnMut(T) + Clone + Send + 'static>(num: u16, f: F) -> Self {
         let mut r = Self {
             tasks: Vec::new(),
@@ -24,39 +23,41 @@ impl<T:'static + Send,> ThreadPool<T> {
             r.tasks.push(Box::new(MyTask {
                 sender: tx,
                 task: thread::spawn(move || {
-                    for stream in rx {
-                        f(stream);
+                    // for stream in rx {
+                    //     f(stream);
+                    // }
+                    loop {
+                        let r = rx.recv();
+                        match r {
+                            Ok(stream) => {
+                                f(stream);
+                            }
+                            Err(e) => {
+								println!("recv() error: {}",e.to_string());
+							}
+                        }
                     }
-                    //    loop{
-                    // 	 let r = rx.recv();
-                    // 	 match r{
-                    // 		Ok(stream)=>{
-                    // 			f(stream);
-                    // 		},
-                    // 		Err(e)=>{}
-                    // 	 }
-                    //    }
                 }),
             }))
         }
         r
     }
 
-    pub(super) fn poll(&mut self, data: T)->Result<(),SendError<T>> {
+    pub(super) fn poll(&mut self, data: T) -> Result<(), SendError<T>> {
         if self.index >= self.max {
             self.index = 0;
         }
         //println!("current:{}", self.index);
         if let Some(task) = self.tasks.get(self.index as usize) {
-            match task.sender.send(data){
+            match task.sender.send(data) {
                 Ok(_) => {
-					self.index += 1;
+                    self.index += 1;
                     return Ok(());
-				},
+                }
                 Err(e) => {
-                  //println!("dispatch stream error:{}",e.to_string());
-                  return Err(e)
-				},
+                    //println!("dispatch stream error:{}",e.to_string());
+                    return Err(e);
+                }
             }
         }
         Ok(())
