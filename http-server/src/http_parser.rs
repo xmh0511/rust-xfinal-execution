@@ -201,108 +201,125 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
     let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(
         conn_data.server_config.write_timeout as u64,
     )));
+
+    // let mut buff = [b'\0';1024];
+    // let _ = stream.read(& mut buff);
+    // let response = "hello";
+    // let s = format!("HTTP/1.1 200 OK\r\nContent-length:{}\r\n\r\n{}",response.len(),response);
+    // let _ = stream.write(s.as_bytes());
+
     'Back: loop {
         let read_result = read_http_head(&mut stream);
         if let Ok((mut head_content, possible_body)) = read_result {
-            let head_result = parse_header(&mut head_content);
+			//println!("{}",head_content);
+            //let head_result = parse_header(&mut head_content);
+            let response = "hello";
+            let s = format!(
+                "HTTP/1.1 200 OK\r\nContent-length:{}\r\n\r\n{}",
+                response.len(),
+                response
+            );
+            let _ = stream.write(s.as_bytes());
+            break;
+
             //println!("{:#?}",head_result.as_ref().unwrap());
-            match head_result {
-                Ok((method, url, version, map)) => {
-                    let need_alive = is_keep_alive(&map);
-                    match has_body(&map) {
-                        HasBody::Len(size) => match possible_body {
-                            Some(partial_body) => {
-                                let mut body = partial_body;
-                                let body = read_body(
-                                    &mut stream,
-                                    &map,
-                                    &mut body,
-                                    size,
-                                    &conn_data.server_config,
-                                );
-                                if let BodyContent::Bad = body {
-                                    break;
-                                }
-                                //println!("{:?}", body);
-                                let r = construct_http_event(
-                                    &mut stream,
-                                    &conn_data.router_map,
-                                    method,
-                                    url,
-                                    version,
-                                    map,
-                                    body,
-                                    need_alive,
-                                    &conn_data.server_config,
-                                );
-                                if need_alive && r {
-                                    continue 'Back;
-                                } else {
-                                    break;
-                                }
-                            }
-                            None => {
-                                let mut body: Vec<u8> = Vec::new();
-                                let body = read_body(
-                                    &mut stream,
-                                    &map,
-                                    &mut body,
-                                    size,
-                                    &conn_data.server_config,
-                                );
-                                let r = construct_http_event(
-                                    &mut stream,
-                                    &conn_data.router_map,
-                                    method,
-                                    url,
-                                    version,
-                                    map,
-                                    body,
-                                    need_alive,
-                                    &conn_data.server_config,
-                                );
-                                if need_alive && r {
-                                    continue 'Back;
-                                } else {
-                                    break;
-                                }
-                            }
-                        },
-                        HasBody::None => {
-                            let r = construct_http_event(
-                                &mut stream,
-                                &conn_data.router_map,
-                                method,
-                                url,
-                                version,
-                                map,
-                                BodyContent::None,
-                                need_alive,
-                                &conn_data.server_config,
-                            );
-                            if need_alive && r {
-                                continue 'Back;
-                            } else {
-                                break;
-                            }
-                        }
-                        HasBody::Bad => {
-                            if conn_data.server_config.open_log {
-                                println!("invalid http body content");
-                            }
-                            let _ = stream.shutdown(Shutdown::Both);
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    if conn_data.server_config.open_log {
-                        println!("invalid http head content:{}", ToString::to_string(&e));
-                    }
-                    let _ = stream.shutdown(Shutdown::Both);
-                    break;
-                }
-            }
+            // match head_result {
+            //     Ok((method, url, version, map)) => {
+            //         let need_alive = is_keep_alive(&map);
+            //         match has_body(&map) {
+            //             HasBody::Len(size) => match possible_body {
+            //                 Some(partial_body) => {
+            //                     let mut body = partial_body;
+            //                     let body = read_body(
+            //                         &mut stream,
+            //                         &map,
+            //                         &mut body,
+            //                         size,
+            //                         &conn_data.server_config,
+            //                     );
+            //                     if let BodyContent::Bad = body {
+            //                         break;
+            //                     }
+            //                     //println!("{:?}", body);
+            //                     let r = construct_http_event(
+            //                         &mut stream,
+            //                         &conn_data.router_map,
+            //                         method,
+            //                         url,
+            //                         version,
+            //                         map,
+            //                         body,
+            //                         need_alive,
+            //                         &conn_data.server_config,
+            //                     );
+            //                     if need_alive && r {
+            //                         continue 'Back;
+            //                     } else {
+            //                         break;
+            //                     }
+            //                 }
+            //                 None => {
+            //                     let mut body: Vec<u8> = Vec::new();
+            //                     let body = read_body(
+            //                         &mut stream,
+            //                         &map,
+            //                         &mut body,
+            //                         size,
+            //                         &conn_data.server_config,
+            //                     );
+            //                     let r = construct_http_event(
+            //                         &mut stream,
+            //                         &conn_data.router_map,
+            //                         method,
+            //                         url,
+            //                         version,
+            //                         map,
+            //                         body,
+            //                         need_alive,
+            //                         &conn_data.server_config,
+            //                     );
+            //                     if need_alive && r {
+            //                         continue 'Back;
+            //                     } else {
+            //                         break;
+            //                     }
+            //                 }
+            //             },
+            //             HasBody::None => {
+            //                 let r = construct_http_event(
+            //                     &mut stream,
+            //                     &conn_data.router_map,
+            //                     method,
+            //                     url,
+            //                     version,
+            //                     map,
+            //                     BodyContent::None,
+            //                     need_alive,
+            //                     &conn_data.server_config,
+            //                 );
+            //                 if need_alive && r {
+            //                     continue 'Back;
+            //                 } else {
+            //                     break;
+            //                 }
+            //             }
+            //             HasBody::Bad => {
+            //                 if conn_data.server_config.open_log {
+            //                     println!("invalid http body content");
+            //                 }
+            //                 let _ = stream.shutdown(Shutdown::Both);
+            //                 break;
+            //             }
+            //         }
+            //     }
+            //     Err(e) => {
+            //         if conn_data.server_config.open_log {
+            //             println!("invalid http head content:{}", ToString::to_string(&e));
+            //         }
+            //         let _ = stream.shutdown(Shutdown::Both);
+            //         break;
+            //     }
+            // }
         } else if let Err(e) = read_result {
             if conn_data.server_config.open_log {
                 println!("error during reading header:{}", e.to_string());
@@ -377,48 +394,90 @@ fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()
     Ok(())
 }
 
+// fn find_complete_header(slice: &[u8]) -> (bool, i32) {
+//     // \r\n\r\n
+//     for (pos, e) in slice.iter().enumerate() {
+//         if e == &b'\r' {
+//             if pos + 1 < slice.len() {
+//                 //
+//                 let c = &slice[pos + 1];
+//                 if c == &b'\n' {
+//                     if pos + 4 <= slice.len() {
+//                         let r = &slice[pos + 2..pos + 4];
+//                         if r == b"\r\n" {
+//                             // is end
+//                             return (true, pos as i32);
+//                         } else {
+//                             continue;
+//                         }
+//                     } else {
+//                         return (false, -1);
+//                     }
+//                 } else {
+//                     continue;
+//                 }
+//             } else {
+//                 return (false, -1);
+//             }
+//         }
+//     }
+//     (false, -1)
+// }
+
+fn find_complete_header(slice: &[u8])-> (bool, i32){
+	let iter = slice.windows(2).into_iter();
+	for (pos,e) in iter.enumerate(){
+		if e == b"\r\n"{
+			if pos + 3 < slice.len(){
+				let second = &slice[pos+2..=pos+3];
+				if second ==  b"\r\n"{
+					return (true, pos as i32);
+				}
+			}else{
+				return (false, -1);
+			}
+		}
+	}
+	(false, -1)
+}
+
 fn read_http_head(
     stream: &mut TcpStream,
 ) -> Result<(String, Option<Vec<u8>>), Box<dyn UnifiedError>> {
-    let mut read_buffs = Vec::new();
+    let mut read_buffs = vec![b'\0';1024];
     let mut total_read_size = 0;
-    let head_end = b"\r\n\r\n";
+	let mut start_read_pos = 0;
     loop {
-        let mut buff: [u8; 1024] = [b'\0'; 1024];
-        match stream.read(&mut buff) {
+        match stream.read(&mut read_buffs[start_read_pos..]) {
             Ok(read_size) => {
                 total_read_size += read_size;
-                read_buffs.extend_from_slice(&buff[..read_size]);
-                let r = read_buffs
-                    .windows(head_end.len())
-                    .position(|v| v == head_end);
-                match r {
-                    Some(pos) => {
-                        // at least have read out complete head
-                        //println!("content:{:?}", buff);
-                        match std::str::from_utf8(&buff[..pos]) {
-                            Ok(s) => {
-                                let crlf_end = pos + 4;
-                                if total_read_size > crlf_end {
-                                    // touch the body
-                                    let mut body_buffs = Vec::new();
-                                    body_buffs.extend_from_slice(&read_buffs[crlf_end..]);
-                                    return Ok((s.to_string(), Some(body_buffs)));
-                                }
-                                return Ok((s.to_string(), None));
+				let slice = &read_buffs[..total_read_size];
+                let r = find_complete_header(slice);
+                if r.0 {
+                    let pos = r.1 as usize;
+                    match std::str::from_utf8(&read_buffs[..pos]) {
+                        Ok(s) => {
+                            let crlf_end = pos + 4;
+                            if total_read_size > crlf_end {
+                                let mut body_buffs = Vec::new();
+                                body_buffs.extend_from_slice(&read_buffs[crlf_end..total_read_size]);
+                                return Ok((s.to_string(), Some(body_buffs)));
                             }
-                            Err(e) => {
-                                return Err(Box::new(e));
-                            }
+                            return Ok((s.to_string(), None));
                         }
-                    }
-                    None => {
-                        if total_read_size > 3*1000*1024{
-                            let e = io::Error::new(io::ErrorKind::InvalidData,"header too large");
+                        Err(e) => {
                             return Err(Box::new(e));
                         }
-                        continue;
-                    },
+                    }
+                } else {
+                    if total_read_size > 1 * 1024 * 1024 {
+                        let e = io::Error::new(io::ErrorKind::InvalidData, "header too large");
+                        return Err(Box::new(e));
+                    }
+					start_read_pos = total_read_size;
+					let len = read_buffs.len();
+					read_buffs.resize(len + 1024, b'\0');
+					continue;
                 }
             }
             Err(e) => {
