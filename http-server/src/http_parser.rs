@@ -212,114 +212,114 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
         let read_result = read_http_head(&mut stream);
         if let Ok((mut head_content, possible_body)) = read_result {
 			//println!("{}",head_content);
-            //let head_result = parse_header(&mut head_content);
-            let response = "hello";
-            let s = format!(
-                "HTTP/1.1 200 OK\r\nContent-length:{}\r\n\r\n{}",
-                response.len(),
-                response
-            );
-            let _ = stream.write(s.as_bytes());
-            break;
+            let head_result = parse_header(&mut head_content);
+            // let response = "hello";
+            // let s = format!(
+            //     "HTTP/1.1 200 OK\r\nContent-length:{}\r\n\r\n{}",
+            //     response.len(),
+            //     response
+            // );
+            // let _ = stream.write(s.as_bytes());
+            // break;
 
             //println!("{:#?}",head_result.as_ref().unwrap());
-            // match head_result {
-            //     Ok((method, url, version, map)) => {
-            //         let need_alive = is_keep_alive(&map);
-            //         match has_body(&map) {
-            //             HasBody::Len(size) => match possible_body {
-            //                 Some(partial_body) => {
-            //                     let mut body = partial_body;
-            //                     let body = read_body(
-            //                         &mut stream,
-            //                         &map,
-            //                         &mut body,
-            //                         size,
-            //                         &conn_data.server_config,
-            //                     );
-            //                     if let BodyContent::Bad = body {
-            //                         break;
-            //                     }
-            //                     //println!("{:?}", body);
-            //                     let r = construct_http_event(
-            //                         &mut stream,
-            //                         &conn_data.router_map,
-            //                         method,
-            //                         url,
-            //                         version,
-            //                         map,
-            //                         body,
-            //                         need_alive,
-            //                         &conn_data.server_config,
-            //                     );
-            //                     if need_alive && r {
-            //                         continue 'Back;
-            //                     } else {
-            //                         break;
-            //                     }
-            //                 }
-            //                 None => {
-            //                     let mut body: Vec<u8> = Vec::new();
-            //                     let body = read_body(
-            //                         &mut stream,
-            //                         &map,
-            //                         &mut body,
-            //                         size,
-            //                         &conn_data.server_config,
-            //                     );
-            //                     let r = construct_http_event(
-            //                         &mut stream,
-            //                         &conn_data.router_map,
-            //                         method,
-            //                         url,
-            //                         version,
-            //                         map,
-            //                         body,
-            //                         need_alive,
-            //                         &conn_data.server_config,
-            //                     );
-            //                     if need_alive && r {
-            //                         continue 'Back;
-            //                     } else {
-            //                         break;
-            //                     }
-            //                 }
-            //             },
-            //             HasBody::None => {
-            //                 let r = construct_http_event(
-            //                     &mut stream,
-            //                     &conn_data.router_map,
-            //                     method,
-            //                     url,
-            //                     version,
-            //                     map,
-            //                     BodyContent::None,
-            //                     need_alive,
-            //                     &conn_data.server_config,
-            //                 );
-            //                 if need_alive && r {
-            //                     continue 'Back;
-            //                 } else {
-            //                     break;
-            //                 }
-            //             }
-            //             HasBody::Bad => {
-            //                 if conn_data.server_config.open_log {
-            //                     println!("invalid http body content");
-            //                 }
-            //                 let _ = stream.shutdown(Shutdown::Both);
-            //                 break;
-            //             }
-            //         }
-            //     }
-            //     Err(e) => {
-            //         if conn_data.server_config.open_log {
-            //             println!("invalid http head content:{}", ToString::to_string(&e));
-            //         }
-            //         let _ = stream.shutdown(Shutdown::Both);
-            //         break;
-            //     }
-            // }
+            match head_result {
+                Ok((method, url, version, map)) => {
+                    let need_alive = is_keep_alive(&map);
+                    match has_body(&map) {
+                        HasBody::Len(size) => match possible_body {
+                            Some(partial_body) => {
+                                let mut body = partial_body;
+                                let body = read_body(
+                                    &mut stream,
+                                    &map,
+                                    &mut body,
+                                    size,
+                                    &conn_data.server_config,
+                                );
+                                if let BodyContent::Bad = body {
+                                    break;
+                                }
+                                //println!("{:?}", body);
+                                let r = construct_http_event(
+                                    &mut stream,
+                                    &conn_data.router_map,
+                                    method,
+                                    url,
+                                    version,
+                                    map,
+                                    body,
+                                    need_alive,
+                                    &conn_data.server_config,
+                                );
+                                if need_alive && r {
+                                    continue 'Back;
+                                } else {
+                                    break;
+                                }
+                            }
+                            None => {
+                                let mut body: Vec<u8> = Vec::new();
+                                let body = read_body(
+                                    &mut stream,
+                                    &map,
+                                    &mut body,
+                                    size,
+                                    &conn_data.server_config,
+                                );
+                                let r = construct_http_event(
+                                    &mut stream,
+                                    &conn_data.router_map,
+                                    method,
+                                    url,
+                                    version,
+                                    map,
+                                    body,
+                                    need_alive,
+                                    &conn_data.server_config,
+                                );
+                                if need_alive && r {
+                                    continue 'Back;
+                                } else {
+                                    break;
+                                }
+                            }
+                        },
+                        HasBody::None => {
+                            let r = construct_http_event(
+                                &mut stream,
+                                &conn_data.router_map,
+                                method,
+                                url,
+                                version,
+                                map,
+                                BodyContent::None,
+                                need_alive,
+                                &conn_data.server_config,
+                            );
+                            if need_alive && r {
+                                continue 'Back;
+                            } else {
+                                break;
+                            }
+                        }
+                        HasBody::Bad => {
+                            if conn_data.server_config.open_log {
+                                println!("invalid http body content");
+                            }
+                            let _ = stream.shutdown(Shutdown::Both);
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    if conn_data.server_config.open_log {
+                        println!("invalid http head content:{}", ToString::to_string(&e));
+                    }
+                    let _ = stream.shutdown(Shutdown::Both);
+                    break;
+                }
+            }
         } else if let Err(e) = read_result {
             if conn_data.server_config.open_log {
                 println!("error during reading header:{}", e.to_string());
@@ -466,6 +466,7 @@ fn read_http_head(
                             return Ok((s.to_string(), None));
                         }
                         Err(e) => {
+							//println!("{:#?}",&read_buffs[..pos]);
                             return Err(Box::new(e));
                         }
                     }
@@ -481,6 +482,7 @@ fn read_http_head(
                 }
             }
             Err(e) => {
+				//println!("error occurs here");
                 return Err(Box::new(e));
             }
         }
