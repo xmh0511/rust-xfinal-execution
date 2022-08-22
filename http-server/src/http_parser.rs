@@ -211,7 +211,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
     'Back: loop {
         let read_result = read_http_head(&mut stream);
         if let Ok((mut head_content, possible_body)) = read_result {
-			//println!("{}",head_content);
+            //println!("{}",head_content);
             let head_result = parse_header(&mut head_content);
             // let response = "hello";
             // let s = format!(
@@ -394,27 +394,16 @@ fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()
     Ok(())
 }
 
+
+
 // fn find_complete_header(slice: &[u8]) -> (bool, i32) {
-//     // \r\n\r\n
-//     for (pos, e) in slice.iter().enumerate() {
-//         if e == &b'\r' {
-//             if pos + 1 < slice.len() {
-//                 //
-//                 let c = &slice[pos + 1];
-//                 if c == &b'\n' {
-//                     if pos + 4 <= slice.len() {
-//                         let r = &slice[pos + 2..pos + 4];
-//                         if r == b"\r\n" {
-//                             // is end
-//                             return (true, pos as i32);
-//                         } else {
-//                             continue;
-//                         }
-//                     } else {
-//                         return (false, -1);
-//                     }
-//                 } else {
-//                     continue;
+//     let iter = slice.windows(2).into_iter();
+//     for (pos, e) in iter.enumerate() {
+//         if e == b"\r\n" {
+//             if pos + 3 < slice.len() {
+//                 let second = &slice[pos + 2..=pos + 3];
+//                 if second == b"\r\n" {
+//                     return (true, pos as i32);
 //                 }
 //             } else {
 //                 return (false, -1);
@@ -424,35 +413,40 @@ fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()
 //     (false, -1)
 // }
 
-fn find_complete_header(slice: &[u8])-> (bool, i32){
-	let iter = slice.windows(2).into_iter();
-	for (pos,e) in iter.enumerate(){
-		if e == b"\r\n"{
-			if pos + 3 < slice.len(){
-				let second = &slice[pos+2..=pos+3];
-				if second ==  b"\r\n"{
-					return (true, pos as i32);
-				}
-			}else{
-				return (false, -1);
-			}
-		}
-	}
-	(false, -1)
+fn find_double_crlf(slice: &[u8]) -> (bool, i64) {
+    let double_crlf = b"\r\n\r\n";
+    match slice
+        .windows(double_crlf.len())
+        .position(|v| v == double_crlf)
+    {
+        Some(pos) => {
+            return (true, pos as i64);
+        }
+        None => {
+            return (false, -1);
+        }
+    }
 }
 
 fn read_http_head(
     stream: &mut TcpStream,
 ) -> Result<(String, Option<Vec<u8>>), Box<dyn UnifiedError>> {
-    let mut read_buffs = vec![b'\0';1024];
+    let mut read_buffs = Vec::new();
+    read_buffs.resize(1024, b'\0');
     let mut total_read_size = 0;
-	let mut start_read_pos = 0;
+    let mut start_read_pos = 0;
+
     loop {
         match stream.read(&mut read_buffs[start_read_pos..]) {
+            //&mut read_buffs[start_read_pos..]
             Ok(read_size) => {
+                if read_size == 0 {
+                    let e = io::Error::new(io::ErrorKind::InvalidInput, "invalid input");
+                    return Err(Box::new(e));
+                }
                 total_read_size += read_size;
-				let slice = &read_buffs[..total_read_size];
-                let r = find_complete_header(slice);
+                let slice = &read_buffs[..total_read_size];
+                let r = find_double_crlf(slice);
                 if r.0 {
                     let pos = r.1 as usize;
                     match std::str::from_utf8(&read_buffs[..pos]) {
@@ -460,29 +454,33 @@ fn read_http_head(
                             let crlf_end = pos + 4;
                             if total_read_size > crlf_end {
                                 let mut body_buffs = Vec::new();
-                                body_buffs.extend_from_slice(&read_buffs[crlf_end..total_read_size]);
+                                body_buffs.extend_from_slice(&slice[crlf_end..]);
                                 return Ok((s.to_string(), Some(body_buffs)));
                             }
                             return Ok((s.to_string(), None));
                         }
                         Err(e) => {
-							//println!("{:#?}",&read_buffs[..pos]);
+                            //println!("{:#?}",&read_buffs[..pos]);
                             return Err(Box::new(e));
                         }
                     }
                 } else {
-                    if total_read_size > 1 * 1024 * 1024 {
+                    if total_read_size > 3 * 1024 * 1024 {
                         let e = io::Error::new(io::ErrorKind::InvalidData, "header too large");
                         return Err(Box::new(e));
                     }
-					start_read_pos = total_read_size;
-					let len = read_buffs.len();
-					read_buffs.resize(len + 1024, b'\0');
-					continue;
+                    start_read_pos = total_read_size;
+                    let len = read_buffs.len();
+                    read_buffs.resize(len + 1024, b'\0');
+                    continue;
                 }
             }
             Err(e) => {
-				//println!("error occurs here");
+                //println!("error occurs here");
+                // if e.kind() == io::ErrorKind::InvalidInput{
+                // 	println!("{:?},{}",read_buffs.len(),start_read_pos);
+                // 	panic!()
+                // }
                 return Err(Box::new(e));
             }
         }

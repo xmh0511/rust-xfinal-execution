@@ -27,7 +27,7 @@ fn main() {
     let mut http_server = HttpServer::create(end_point!(0.0.0.0:8080), 10);
 
     http_server.set_write_timeout(5 * 1000);
-    http_server.open_server_log(true);
+    http_server.open_server_log(false);
 
     let middlewares = inject_middlewares! {
         |_req:& Request,_res:&mut Response|->bool{
