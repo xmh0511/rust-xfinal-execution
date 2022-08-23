@@ -223,7 +223,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
             // let _ = stream.write(s.as_bytes());
             // break;
 
-            //println!("{:#?}",head_result.as_ref().unwrap());
+            //println!("{:#?}", head_result.as_ref().unwrap());
             match head_result {
                 Ok((method, url, version, map)) => {
                     let need_alive = is_keep_alive(&map);
@@ -266,6 +266,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                 }
                             }
                             None => {
+                                //println!("in this logic, {}", size);
                                 let mut body: Vec<u8> = Vec::new();
                                 let body = read_body(
                                     &mut stream,
@@ -638,6 +639,7 @@ fn read_body<'a, 'b, 'c>(
                 if len > has_read_len {
                     // need to read out the remainder body content
                     let remainder = len - has_read_len;
+                    //println!("neee size, {}", remainder);
                     //println!("need to read out the remainder body content");
                     return read_body_according_to_type(
                         stream,
@@ -731,6 +733,21 @@ fn read_body_according_to_type<'a>(
                     //println!("boundary: {}", boundary);
                     let end_boundary = format!("{}--", &boundary);
                     //println!("end boundary {}",end_boundary);
+                    if container.len() == 0 {
+                        let divider_len = boundary.len() + 2; // include \r\n
+                        container.resize(divider_len, b'\0');
+                        match stream.read_exact(container) {
+                            Ok(_) => {
+								need_read_size-=divider_len;
+							},
+                            Err(e) => {
+								if server_config.open_log {
+									println!("{}", ToString::to_string(&e));
+								}
+								return BodyContent::Bad;
+							},
+                        }
+                    }
                     let r = read_multiple_form_body(
                         stream,
                         container,
@@ -1411,7 +1428,6 @@ fn read_multiple_form_body<'a>(
                         }
                     }
                 }
-                //println!("{:#?}", multiple_data_collection);
                 return io::Result::Ok(multiple_data_collection);
             }
             Err(_) => {
