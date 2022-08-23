@@ -1236,7 +1236,7 @@ fn read_multiple_form_body<'a>(
                                                             buffs = temp;
                                                             continue 'Outer;
                                                         } else {
-                                                            //平凑后发现\r\n不是形成分隔符的关键字，那么\r\n就是文件内容的一部分
+                                                            //拼凑后发现\r\n不是形成分隔符的关键字，那么\r\n就是文件内容的一部分
                                                             file_handle
                                                                 .write(&buffs[0..=pos + 1])
                                                                 .unwrap();
