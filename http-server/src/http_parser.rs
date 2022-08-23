@@ -1307,13 +1307,23 @@ fn read_multiple_form_body<'a>(
                         continue;
                     }
                     let r = el.split_once("\r\n\r\n");
-                    let r = r.unwrap();
-
-                    let name = get_config_from_disposition(r.0, false);
-                    let text_len = r.1.len();
-                    multiple_data_collection
-                        .insert(name.0, MultipleFormData::Text(&r.1[0..text_len - 2]));
-                    //处理文本时, 包含了分隔符的\r\n，在这里去除
+                    //let r = r.unwrap();
+                    match r {
+                        Some(r) => {
+                            let name = get_config_from_disposition(r.0, false);
+                            let text_len = r.1.len();
+                            multiple_data_collection
+                                .insert(name.0, MultipleFormData::Text(&r.1[0..text_len - 2]));
+                            //处理文本时, 包含了分隔符的\r\n，在这里去除
+                        }
+                        None => {
+                            let e = io::Error::new(
+                                ErrorKind::InvalidData,
+                                "bad body with unknown format multipart form",
+                            );
+                            return io::Result::Err(e);
+                        }
+                    }
                 }
                 //println!("{:#?}", multiple_data_collection);
                 return io::Result::Ok(multiple_data_collection);
