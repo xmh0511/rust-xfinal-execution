@@ -9,17 +9,18 @@ fn interrupt_one(req: &Request, res: &mut Response) -> bool {
     println!("invoke middleware2");
     match req.get_param("id") {
         Some(v) => {
-			if v == "1"{
-				true
-			}else{
-				res.write_string("invalid request, invalid id value").status(400);
-				false
-			}
-		},
+            if v == "1" {
+                true
+            } else {
+                res.write_string("invalid request, invalid id value")
+                    .status(400);
+                false
+            }
+        }
         None => {
-			res.write_string("invalid request, no id").status(400);
-			false
-		},
+            res.write_string("invalid request, no id").status(400);
+            false
+        }
     }
 }
 
@@ -47,12 +48,21 @@ fn main() {
     http_server
         .route(POST, "/post")
         .reg(|req: &Request, res: &mut Response| {
-			let body = req.plain_body();
-			if let Some(x) = body{
-				res.write_string(x);
-			}else{
-				res.write_string("no body");
-			}
+            let body = req.plain_body();
+            if let Some(x) = body {
+                res.write_string(x);
+            } else {
+                res.write_string("no body");
+            }
+        });
+
+    http_server
+        .route(POST, "/multiple")
+        .reg(|req: &Request, res: &mut Response| {
+			let files = req.get_files();
+			let texts = req.get_queries();
+			let s = format!("texts:{:#?}\n files:{:#?}",texts,files);
+			res.write_string(&s);
         });
 
     http_server
@@ -70,7 +80,8 @@ fn main() {
     http_server
         .route(GET, "/file")
         .reg(|_req: &Request, res: &mut Response| {
-            res.write_file(String::from("./upload/test.txt")).status(200);
+            res.write_file(String::from("./upload/test.txt"))
+                .status(200);
         });
 
     http_server
