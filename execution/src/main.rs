@@ -63,6 +63,7 @@ fn main() {
 			let files = req.get_files();
 			let texts = req.get_queries();
 			let s = format!("texts:{:#?}\n files:{:#?}",texts,files);
+			res.add_header("Content-type".to_string(), "text/html; charset=utf-8".to_string());
 			res.write_string(&s);
         });
 
