@@ -117,7 +117,7 @@ impl HttpServer {
                 open_log: false,
                 max_body_size: 3 * 1024 * 1024,
                 max_header_size: 3 * 1024 * 1024,
-                read_buff_increase_size: 256,
+                read_buff_increase_size: 1024,
             },
         }
     }
