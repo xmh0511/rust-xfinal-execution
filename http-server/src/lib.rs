@@ -116,6 +116,8 @@ impl HttpServer {
                 write_timeout: 5 * 1000,
                 open_log: false,
                 max_body_size: 3 * 1024 * 1024,
+                max_header_size: 3 * 1024 * 1024,
+                read_buff_increase_size: 256,
             },
         }
     }
@@ -141,8 +143,16 @@ impl HttpServer {
         self.config_.open_log = open;
     }
 
-	pub fn set_max_body_size(& mut self, size:usize){
-		self.config_.max_body_size = size;
+    pub fn set_max_body_size(&mut self, size: usize) {
+        self.config_.max_header_size = size;
+    }
+
+    pub fn set_max_header_size(&mut self, size: usize) {
+        self.config_.max_body_size = size;
+    }
+
+	pub fn set_read_buff_increase_size(&mut self, size: usize){
+        self.config_.read_buff_increase_size = size;
 	}
 
     pub fn run(&mut self) {

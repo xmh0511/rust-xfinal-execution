@@ -86,6 +86,8 @@ pub struct ServerConfig {
     pub(super) write_timeout: u32,
     pub(super) open_log: bool,
     pub(super) max_body_size: usize,
+    pub(super) max_header_size: usize,
+    pub(super) read_buff_increase_size: usize,
 }
 
 enum HasBody {
@@ -210,7 +212,7 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
     // let _ = stream.write(s.as_bytes());
 
     'Back: loop {
-        let read_result = read_http_head(&mut stream);
+        let read_result = read_http_head(&mut stream, &conn_data.server_config);
         if let Ok((mut head_content, possible_body)) = read_result {
             //println!("{}",head_content);
             let head_result = parse_header(&mut head_content);
@@ -275,6 +277,15 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                     size,
                                     &conn_data.server_config,
                                 );
+                                if let BodyContent::Bad = body {
+                                    break;
+                                }
+                                if let BodyContent::TooLarge = body {
+                                    if conn_data.server_config.open_log {
+                                        println!("the non-multiple-form body is too large");
+                                    }
+                                    break;
+                                }
                                 let r = construct_http_event(
                                     &mut stream,
                                     &conn_data.router_map,
@@ -436,9 +447,10 @@ fn find_double_crlf(slice: &[u8]) -> (bool, i64) {
 
 fn read_http_head(
     stream: &mut TcpStream,
+    server_config: &ServerConfig,
 ) -> Result<(String, Option<Vec<u8>>), Box<dyn UnifiedError>> {
     let mut read_buffs = Vec::new();
-    read_buffs.resize(1024, b'\0');
+    read_buffs.resize(server_config.read_buff_increase_size, b'\0');
     let mut total_read_size = 0;
     let mut start_read_pos = 0;
 
@@ -472,13 +484,13 @@ fn read_http_head(
                         }
                     }
                 } else {
-                    if total_read_size > 3 * 1024 * 1024 {
+                    if total_read_size > server_config.max_header_size {
                         let e = io::Error::new(io::ErrorKind::InvalidData, "header too large");
                         return Err(Box::new(e));
                     }
                     start_read_pos = total_read_size;
                     let len = read_buffs.len();
-                    read_buffs.resize(len + 1024, b'\0');
+                    read_buffs.resize(len + server_config.read_buff_increase_size, b'\0');
                     continue;
                 }
             }
@@ -733,19 +745,20 @@ fn read_body_according_to_type<'a>(
                     //println!("boundary: {}", boundary);
                     let end_boundary = format!("{}--", &boundary);
                     //println!("end boundary {}",end_boundary);
-                    if container.len() == 0 {  //读头时没有读到body
+                    if container.len() == 0 {
+                        //读头时没有读到body
                         let divider_len = boundary.len() + 2; // include --Boundary\r\n
                         container.resize(divider_len, b'\0');
                         match stream.read_exact(container) {
                             Ok(_) => {
-								need_read_size-=divider_len;
-							},
+                                need_read_size -= divider_len;
+                            }
                             Err(e) => {
-								if server_config.open_log {
-									println!("{}", ToString::to_string(&e));
-								}
-								return BodyContent::Bad;
-							},
+                                if server_config.open_log {
+                                    println!("{}", ToString::to_string(&e));
+                                }
+                                return BodyContent::Bad;
+                            }
                         }
                     }
                     let r = read_multiple_form_body(
@@ -943,17 +956,17 @@ fn contains_substr(
             let need = pat_len - sub_str_len;
             //let may_sub_slice = &body_slice[pos..];
             let start_read_pos = body_slice.len();
-			body_slice.resize(start_read_pos +need , b'\0');
+            body_slice.resize(start_read_pos + need, b'\0');
             //let mut buff = vec![b'\0'; need];
 
-            match stream.read_exact(& mut body_slice[start_read_pos..]) {
+            match stream.read_exact(&mut body_slice[start_read_pos..]) {
                 Ok(_) => {
                     *need_size -= need;
                     // let mut complete = Vec::new();
                     // complete.extend_from_slice(may_sub_slice);
                     // complete.extend_from_slice(&buff);
                     //body_slice.extend_from_slice(&buff);
-                    if &body_slice[pos..pos+need] == pat {
+                    if &body_slice[pos..pos + need] == pat {
                         //读取可以比较的数据后，比较结果包含pat
                         return io::Result::Ok(FindSet {
                             find_pos: pos as i64,
@@ -1052,8 +1065,11 @@ fn read_multiple_form_body<'a>(
                     r = contains_substr(stream, &mut need_size, &mut buffs, crlf_sequence, 0)?; // 通过找\r\n
                     if r.find_pos == -1 {
                         //let mut buff = [b'\0'; 256];
-						let start_read_pos = buffs.len();
-						buffs.resize(start_read_pos + 256, b'\0');
+                        let start_read_pos = buffs.len();
+                        buffs.resize(
+                            start_read_pos + server_config.read_buff_increase_size,
+                            b'\0',
+                        );
                         match stream.read(&mut buffs[start_read_pos..]) {
                             Ok(size) => {
                                 if size == 0 {
@@ -1066,6 +1082,7 @@ fn read_multiple_form_body<'a>(
                                     return io::Result::Err(e);
                                 }
                                 need_size -= size;
+                                buffs.resize(start_read_pos + size, b'\0');
                             }
                             Err(e) => {
                                 return io::Result::Err(e);
@@ -1105,8 +1122,11 @@ fn read_multiple_form_body<'a>(
                             )?;
                             if find_boundary.find_pos == -1 {
                                 //let mut buff = [b'\0'; 256];
-								let start_read_pos = buffs.len();
-								buffs.resize(start_read_pos + 256, b'\0');
+                                let start_read_pos = buffs.len();
+                                buffs.resize(
+                                    start_read_pos + server_config.read_buff_increase_size,
+                                    b'\0',
+                                );
                                 match stream.read(&mut buffs[start_read_pos..]) {
                                     Ok(size) => {
                                         if size == 0 {
@@ -1120,7 +1140,7 @@ fn read_multiple_form_body<'a>(
                                             return io::Result::Err(e);
                                         }
                                         //buffs.extend_from_slice(&buff[..size]);
-										buffs.resize(start_read_pos + size, b'\0');
+                                        buffs.resize(start_read_pos + size, b'\0');
                                         need_size -= size;
                                     }
                                     Err(e) => {
@@ -1176,8 +1196,11 @@ fn read_multiple_form_body<'a>(
                             )?;
                             if find_double_crlf.find_pos == -1 {
                                 //let mut buff = [b'\0'; 256];
-								let start_read_pos = buffs.len();
-								buffs.resize(start_read_pos + 256, b'\0');
+                                let start_read_pos = buffs.len();
+                                buffs.resize(
+                                    start_read_pos + server_config.read_buff_increase_size,
+                                    b'\0',
+                                );
                                 match stream.read(&mut buffs[start_read_pos..]) {
                                     Ok(size) => {
                                         if size == 0 {
@@ -1191,7 +1214,7 @@ fn read_multiple_form_body<'a>(
                                             return io::Result::Err(e);
                                         }
                                         //buffs.extend_from_slice(&buff[..size]);
-										buffs.resize(start_read_pos + size, b'\0');
+                                        buffs.resize(start_read_pos + size, b'\0');
                                         need_size -= size;
                                     }
                                     Err(e) => {
@@ -1229,8 +1252,8 @@ fn read_multiple_form_body<'a>(
                                 if find_cr.find_pos == -1 {
                                     //如果整个字节串里没有\r, 那么一定都是文件内容
                                     file_handle.write(&buffs).unwrap();
-									//buffs.clear();
-									buffs.resize(1024, b'\0');
+                                    //buffs.clear();
+                                    buffs.resize(server_config.read_buff_increase_size, b'\0');
                                     match stream.read(&mut buffs[0..]) {
                                         Ok(size) => {
                                             if size == 0 {
@@ -1248,7 +1271,7 @@ fn read_multiple_form_body<'a>(
                                                 return io::Result::Err(e);
                                             }
                                             need_size -= size;
-											buffs.resize(size, b'\0');
+                                            buffs.resize(size, b'\0');
                                             //buffs.clear();
                                             //buffs.extend_from_slice(&file_buff[..size]);
                                         }
@@ -1293,8 +1316,12 @@ fn read_multiple_form_body<'a>(
                                                 //如果关键字是\r\n, 但后续没有足够能够进行比较的字节
 
                                                 //let mut need_buff = vec![b'\0'; 1024];
-												let start_read_pos = buffs.len();
-												buffs.resize(start_read_pos + 1024, b'\0');
+                                                let start_read_pos = buffs.len();
+                                                buffs.resize(
+                                                    start_read_pos
+                                                        + server_config.read_buff_increase_size,
+                                                    b'\0',
+                                                );
                                                 match stream.read(&mut buffs[start_read_pos..]) {
                                                     //继续读一部分内容以进行拼凑比较
                                                     Ok(size) => {
@@ -1309,7 +1336,7 @@ fn read_multiple_form_body<'a>(
                                                             return io::Result::Err(e);
                                                         }
                                                         need_size -= size;
-														buffs.resize(start_read_pos + size, b'\0');
+                                                        buffs.resize(start_read_pos + size, b'\0');
                                                         //buffs.extend_from_slice(&need_buff[..size]);
                                                         let r = find_substr_once(
                                                             &buffs,
@@ -1361,10 +1388,10 @@ fn read_multiple_form_body<'a>(
                                     } else {
                                         // \r正好是buffs里面的最后一个字节，那么只能确定0~前一个字节是文件内容
                                         file_handle.write(&buffs[0..pos]).unwrap();
-										//buffs.clear();
-										buffs.resize(1024, b'\0');
-										buffs[0] = b'\r';
-										//println!("{},{}",buffs.len(),pos);
+                                        //buffs.clear();
+                                        buffs.resize(server_config.read_buff_increase_size, b'\0');
+                                        buffs[0] = b'\r';
+                                        //println!("{},{}",buffs.len(),pos);
                                         //let mut temp_buff = [b'\0'; 1024];
                                         match stream.read(&mut buffs[1..]) {
                                             Ok(size) => {
@@ -1385,7 +1412,7 @@ fn read_multiple_form_body<'a>(
                                                 //let mut temp = Vec::new();
                                                 //temp.extend_from_slice(&buffs[pos..]);
                                                 need_size -= size;
-												buffs.resize(1 + size, b'\0');
+                                                buffs.resize(1 + size, b'\0');
                                                 //temp.extend_from_slice(&temp_buff[..size]);
                                                 //buffs = temp;
                                                 continue;
