@@ -59,6 +59,7 @@ fn main() {
     http_server
         .route(POST, "/multiple")
         .reg(|req: &Request, res: &mut Response| {
+			//println!("multiple");
 			let files = req.get_files();
 			let texts = req.get_queries();
 			let s = format!("texts:{:#?}\n files:{:#?}",texts,files);

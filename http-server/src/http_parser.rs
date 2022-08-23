@@ -446,7 +446,8 @@ fn read_http_head(
             //&mut read_buffs[start_read_pos..]
             Ok(read_size) => {
                 if read_size == 0 {
-                    let e = io::Error::new(io::ErrorKind::InvalidInput, "invalid input");
+                    let info = format!("file:{}, line: {}, lost connection", file!(), line!());
+                    let e = io::Error::new(io::ErrorKind::InvalidInput, info);
                     return Err(Box::new(e));
                 }
                 total_read_size += read_size;
@@ -741,7 +742,12 @@ fn read_body_according_to_type<'a>(
                         Ok(form) => {
                             return BodyContent::Multi(form);
                         }
-                        Err(_) => return BodyContent::Bad,
+                        Err(e) => {
+                            if server_config.open_log {
+                                println!("{}", ToString::to_string(&e));
+                            }
+                            return BodyContent::Bad;
+                        }
                     }
                 }
                 None => return BodyContent::Bad,
@@ -1030,6 +1036,15 @@ fn read_multiple_form_body<'a>(
                         let mut buff = [b'\0'; 256];
                         match stream.read(&mut buff) {
                             Ok(size) => {
+                                if size == 0 {
+                                    let info = format!(
+                                        "file:{}, line: {}, lost connection",
+                                        file!(),
+                                        line!()
+                                    );
+                                    let e = io::Error::new(io::ErrorKind::InvalidInput, info);
+                                    return io::Result::Err(e);
+                                }
                                 buffs.extend_from_slice(&buff[..size]);
                                 need_size -= size;
                             }
@@ -1073,6 +1088,16 @@ fn read_multiple_form_body<'a>(
                                 let mut buff = [b'\0'; 256];
                                 match stream.read(&mut buff) {
                                     Ok(size) => {
+                                        if size == 0 {
+                                            let info = format!(
+                                                "file:{}, line: {}, lost connection",
+                                                file!(),
+                                                line!()
+                                            );
+                                            let e =
+                                                io::Error::new(io::ErrorKind::InvalidInput, info);
+                                            return io::Result::Err(e);
+                                        }
                                         buffs.extend_from_slice(&buff[..size]);
                                         need_size -= size;
                                     }
@@ -1131,6 +1156,16 @@ fn read_multiple_form_body<'a>(
                                 let mut buff = [b'\0'; 256];
                                 match stream.read(&mut buff) {
                                     Ok(size) => {
+                                        if size == 0 {
+                                            let info = format!(
+                                                "file:{}, line: {}, lost connection",
+                                                file!(),
+                                                line!()
+                                            );
+                                            let e =
+                                                io::Error::new(io::ErrorKind::InvalidInput, info);
+                                            return io::Result::Err(e);
+                                        }
                                         buffs.extend_from_slice(&buff[..size]);
                                         need_size -= size;
                                     }
@@ -1156,6 +1191,7 @@ fn read_multiple_form_body<'a>(
                                 .open(file.filepath.clone())
                                 .unwrap();
 
+                            let file_path = file.filepath.clone();
                             multiple_data_collection
                                 .insert(file.form_indice.clone(), MultipleFormData::File(file));
 
@@ -1170,11 +1206,29 @@ fn read_multiple_form_body<'a>(
                                     file_handle.write(&buffs).unwrap();
                                     match stream.read(&mut file_buff) {
                                         Ok(size) => {
+                                            if size == 0 {
+                                                let info = format!(
+                                                    "file:{}, line: {}, lost connection",
+                                                    file!(),
+                                                    line!()
+                                                );
+                                                let e = io::Error::new(
+                                                    io::ErrorKind::InvalidInput,
+                                                    info,
+                                                );
+                                                drop(file_handle);
+                                                let _ = std::fs::remove_file(file_path);
+                                                return io::Result::Err(e);
+                                            }
                                             need_size -= size;
                                             buffs.clear();
                                             buffs.extend_from_slice(&file_buff[..size]);
                                         }
-                                        Err(e) => return io::Result::Err(e),
+                                        Err(e) => {
+                                            drop(file_handle);
+                                            let _ = std::fs::remove_file(file_path);
+                                            return io::Result::Err(e);
+                                        }
                                     }
                                 } else {
                                     let pos = find_cr.find_pos as usize;
@@ -1215,6 +1269,16 @@ fn read_multiple_form_body<'a>(
                                                 match stream.read(&mut need_buff) {
                                                     //继续读一部分内容以进行拼凑比较
                                                     Ok(size) => {
+                                                        if size == 0 {
+                                                            let info = format!("file:{}, line: {}, lost connection",file!(),line!());
+                                                            let e = io::Error::new(
+                                                                io::ErrorKind::InvalidInput,
+                                                                info,
+                                                            );
+                                                            drop(file_handle);
+                                                            let _ = std::fs::remove_file(file_path);
+                                                            return io::Result::Err(e);
+                                                        }
                                                         need_size -= size;
                                                         buffs.extend_from_slice(&need_buff[..size]);
                                                         let r = find_substr_once(
@@ -1249,7 +1313,11 @@ fn read_multiple_form_body<'a>(
                                                             continue;
                                                         }
                                                     }
-                                                    Err(e) => return io::Result::Err(e),
+                                                    Err(e) => {
+                                                        drop(file_handle);
+                                                        let _ = std::fs::remove_file(file_path);
+                                                        return io::Result::Err(e);
+                                                    }
                                                 }
                                             }
                                         } else {
@@ -1266,6 +1334,20 @@ fn read_multiple_form_body<'a>(
                                         let mut temp_buff = [b'\0'; 1024];
                                         match stream.read(&mut temp_buff) {
                                             Ok(size) => {
+                                                if size == 0 {
+                                                    let info = format!(
+                                                        "file:{}, line: {}, lost connection",
+                                                        file!(),
+                                                        line!()
+                                                    );
+                                                    let e = io::Error::new(
+                                                        io::ErrorKind::InvalidInput,
+                                                        info,
+                                                    );
+                                                    drop(file_handle);
+                                                    let _ = std::fs::remove_file(file_path);
+                                                    return io::Result::Err(e);
+                                                }
                                                 let mut temp = Vec::new();
                                                 temp.extend_from_slice(&buffs[pos..]);
                                                 need_size -= size;
@@ -1273,7 +1355,11 @@ fn read_multiple_form_body<'a>(
                                                 buffs = temp;
                                                 continue;
                                             }
-                                            Err(e) => return io::Result::Err(e),
+                                            Err(e) => {
+                                                drop(file_handle);
+                                                let _ = std::fs::remove_file(file_path);
+                                                return io::Result::Err(e);
+                                            }
                                         }
                                     }
                                 }
