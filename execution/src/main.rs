@@ -46,8 +46,13 @@ fn main() {
 
     http_server
         .route(POST, "/post")
-        .reg(|_req: &Request, res: &mut Response| {
-            res.write_string("hello from router");
+        .reg(|req: &Request, res: &mut Response| {
+			let body = req.plain_body();
+			if let Some(x) = body{
+				res.write_string(x);
+			}else{
+				res.write_string("no body");
+			}
         });
 
     http_server

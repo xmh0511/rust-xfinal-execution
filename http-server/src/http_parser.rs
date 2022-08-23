@@ -85,6 +85,7 @@ pub struct ServerConfig {
     pub(super) chunk_size: u32,
     pub(super) write_timeout: u32,
     pub(super) open_log: bool,
+    pub(super) max_body_size: usize,
 }
 
 enum HasBody {
@@ -240,6 +241,12 @@ pub fn handle_incoming((conn_data, mut stream): (Arc<ConnectionData>, TcpStream)
                                 if let BodyContent::Bad = body {
                                     break;
                                 }
+                                if let BodyContent::TooLarge = body {
+                                    if conn_data.server_config.open_log {
+                                        println!("the non-multiple-form body is too large");
+                                    }
+                                    break;
+                                }
                                 //println!("{:?}", body);
                                 let r = construct_http_event(
                                     &mut stream,
@@ -393,8 +400,6 @@ fn write_chunk(stream: &mut TcpStream, response: &mut Response) -> io::Result<()
     stream.flush()?;
     Ok(())
 }
-
-
 
 // fn find_complete_header(slice: &[u8]) -> (bool, i32) {
 //     let iter = slice.windows(2).into_iter();
@@ -673,18 +678,31 @@ fn read_body_according_to_type<'a>(
     let tp = body_type.to_lowercase();
     if !tp.contains("multipart/form-data") {
         if need_read_size != 0 {
-            let mut buf: [u8; 1024] = [b'\0'; 1024];
+            //let mut buf: [u8; 1024] = [b'\0'; 1024];
+            let len = container.len();
+            //println!("alread read size {}",len);
+            let total_len = len + need_read_size;
+
+            if total_len > server_config.max_body_size {
+                return BodyContent::TooLarge;
+            }
+            container.resize(total_len, b'\0');
+            let mut start_pos = len;
             loop {
-                match stream.read(&mut buf) {
+                match stream.read(&mut container[start_pos..]) {
                     Ok(read_size) => {
-                        //println!("read size is:{}\n{:?}",read_size,buf);
-                        container.extend_from_slice(&buf[..read_size]);
+                        if read_size == 0 {
+                            return BodyContent::Bad;
+                        }
+                        //println!("read size is:{}",read_size);
                         need_read_size -= read_size;
+                        start_pos += read_size;
                     }
                     Err(_) => {
                         return BodyContent::Bad;
                     }
                 }
+                //println!("{}",need_read_size);
                 if need_read_size == 0 {
                     break;
                 }

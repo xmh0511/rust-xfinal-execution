@@ -43,10 +43,10 @@ impl SerializationMethods for &[u8] {
     }
 }
 
-impl<const I:usize> SerializationMethods for [u8;I]{
+impl<const I: usize> SerializationMethods for [u8; I] {
     fn serialize(&self) -> Vec<&'static str> {
-		let mut r = Vec::new();
-		for e in *self {
+        let mut r = Vec::new();
+        for e in *self {
             let m = get_httpmethod_from_code(e);
             r.push(m);
         }
@@ -114,7 +114,8 @@ impl HttpServer {
                 read_timeout: 5 * 1000,
                 chunk_size: 1024 * 5,
                 write_timeout: 5 * 1000,
-				open_log:false
+                open_log: false,
+                max_body_size: 3 * 1024 * 1024,
             },
         }
     }
@@ -128,7 +129,7 @@ impl HttpServer {
         self.config_.read_timeout = millis;
     }
 
-	pub fn set_write_timeout(&mut self, millis: u32) {
+    pub fn set_write_timeout(&mut self, millis: u32) {
         self.config_.write_timeout = millis;
     }
 
@@ -136,8 +137,12 @@ impl HttpServer {
         self.config_.chunk_size = size;
     }
 
-	pub fn open_server_log(&mut self, open:bool){
-		self.config_.open_log = open;
+    pub fn open_server_log(&mut self, open: bool) {
+        self.config_.open_log = open;
+    }
+
+	pub fn set_max_body_size(& mut self, size:usize){
+		self.config_.max_body_size = size;
 	}
 
     pub fn run(&mut self) {
@@ -167,17 +172,17 @@ impl HttpServer {
                     match conn {
                         Ok(stream) => {
                             let conn_data = conn_data.clone();
-                            match pool.poll((conn_data, stream)){
-                                Ok(_) => {},
+                            match pool.poll((conn_data, stream)) {
+                                Ok(_) => {}
                                 Err(e) => {
-                                    if self.config_.open_log{
-                                        println!("Send Connection Error: {}",e.to_string());
+                                    if self.config_.open_log {
+                                        println!("Send Connection Error: {}", e.to_string());
                                     }
-                                },
+                                }
                             }
                         }
                         Err(e) => {
-                            if self.config_.open_log{
+                            if self.config_.open_log {
                                 println!("on connection error:{}", e.to_string());
                             }
                         }
@@ -197,9 +202,9 @@ impl HttpServer {
         path: &'a str,
     ) -> RouterRegister<'_> {
         //let method = get_httpmethod_from_code(M);
-		if path.trim() == "/*"{
-			panic!("/* => wildcard of root path is not permitted!")
-		}
+        if path.trim() == "/*" {
+            panic!("/* => wildcard of root path is not permitted!")
+        }
         RouterRegister {
             server: self,
             methods: methods.serialize(),

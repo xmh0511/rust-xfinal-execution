@@ -698,6 +698,7 @@ pub enum BodyContent<'a> {
     Multi(HashMap<String, MultipleFormData<'a>>),
     None,
     Bad,
+	TooLarge
 }
 
 #[derive(Debug)]
